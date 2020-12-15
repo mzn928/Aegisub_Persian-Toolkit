@@ -26,3 +26,6 @@ Correct common mistakes in Persian text.
 Converts non-RTL typed text to RTL compatible one.
 ## Fix RTL
 Fix display issues for RTL typed text.
+
+# Dependencies
+- [utf8.lua](https://github.com/Stepets/utf8.lua)
