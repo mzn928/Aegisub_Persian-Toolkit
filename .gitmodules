@@ -1,3 +1,0 @@
-[submodule "include/utf8"]
-	path = include/utf8
-	url = https://github.com/Stepets/utf8.lua.git
