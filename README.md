@@ -24,8 +24,13 @@ Mentioned directories are at the locations bellow:
 Correct common mistakes in Persian text.
 ## Unretard
 Converts non-RTL typed text to RTL compatible one.
-## Fix RTL
-Fix display issues for RTL typed text.
+## RTL
+Fix RTL languages displaying issues.
+## Un-RTL
+Undo RTL function effects.
+## RTL Editor (Edited version of MasafAutomation\'s RTL Editor)
+An editor for easy editing of RTL language lines.
 
-# Dependencies
+# Credits
 - [utf8.lua](https://github.com/Stepets/utf8.lua)
+- [MasafAutomation](https://github.com/Majid110/MasafAutomation)

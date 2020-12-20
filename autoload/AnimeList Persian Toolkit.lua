@@ -1,16 +1,53 @@
+-- Special thanks to Majid110 for inspiring us the great feature of RTL Editor.
+-- https://github.com/Majid110/MasafAutomation
+
 -- Authers of each section:
 -- PakNevis: SSgumS
--- Fix RTL: Shinsekai_Yuri
+-- RTL: Shinsekai_Yuri & SSgumS
+-- Un-RTL: Shinsekai_Yuri & SSgumS
 -- Unretard: SSgumS & MD
+-- RTL Editor: Majid Shamkhani (Edited by SSgumS)
 
-script_name = 'AnimeList Persian Toolkit'
-script_description = 'A toolkit for easier persian fansubbing.'
-script_author = 'AnimeList Team'
-script_version = "1.0.0"
+local script_name = 'AnimeList Persian Toolkit'
+local script_description = 'A toolkit for easier persian fansubbing.'
+local script_author = 'AnimeList Team'
+local script_version = '1.1.0'
 
-utf8 = require 'utf8':init()
+----- Script Names -----
+local paknevis_script_name = 'AL Persian Toolkit/PakNevis'
+local rtl_script_name = 'AL Persian Toolkit/RTL'
+local unrtl_script_name = 'AL Persian Toolkit/Un-RTL'
+local unretard_script_name = 'AL Persian Toolkit/Unretard'
+local rtleditor_script_name = 'AL Persian Toolkit/RTL Editor'
 
-function paknevis(subtitles, selected_lines, active_line)
+----- Global Dependencies -----
+utf8 = require 'AL.utf8':init()
+
+----- Global Variables ----
+RLE = utf8.char(0x202B)
+
+----- Global Functions -----
+local function removeRtlChars(s)
+    s = utf8.gsub(s, '['..RLE..']', '')
+    return s
+end
+
+local function rtl(s)
+    if '{' ~= string.sub(s, 0, 1) then
+        s = RLE..s
+    end
+    s = utf8.gsub(s, '(\\[Nn])([^\\{])', '%1'..RLE..'%2')
+    s = utf8.gsub(s, '}([^{])', '}'..RLE..'%1')
+    return s
+end
+
+local function unrtl(s)
+    s = removeRtlChars(s)
+    return s
+end
+
+----- PakNevis -----
+function PakNevis(subtitles, selected_lines, active_line)
     -- local translation_src = ' كي“”0123456789?⸮,’‘ﺑﺗﺛﺟﺣﺧﺳﺷﺻﺿﻃﻇﻋﻏﻓﻗﻛﻟﻣﻧﻫﻳﺋﺍﺏﺕﺙﺝﺡﺥﺩﺫﺭﺯﺱﺵﺹﺽﻁﻅﻉﻍﻑﻕﻙﻝﻡﻥﻩﻭﻱﺁﺃﺅﺇﺉˈﯿٱھ《》'
     -- local translation_dst = ' کی""۰۱۲۳۴۵۶۷۸۹؟؟،\'\'بتثجحخسشصضطظعغفقکلمنهیئابتثجحخدذرزسشصضطظعغفقکلمنهویآأؤإئ\'یاه«»'
     local persian_alphabets = 'ابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی'
@@ -57,10 +94,11 @@ function paknevis(subtitles, selected_lines, active_line)
         line.text = utf8.gsub(line.text, '([^ ]ه) (ا[میشنت][مد]?)$', '%1‌%2') -- join ام, ایم, اش, اند, ای, اید, ات
 		subtitles[i] = line
 	end
-	aegisub.set_undo_point(script_name)
+	aegisub.set_undo_point(paknevis_script_name)
 end
 
-function unretard(subtitles, selected_lines, active_line)
+----- Unretard -----
+function Unretard(subtitles, selected_lines, active_line)
     local ending_punc = '%.:!،«%[%(- '
     local starting_punc = '»%]%)- '
 
@@ -129,33 +167,86 @@ function unretard(subtitles, selected_lines, active_line)
 
 		subtitles[i] = line
 	end
-	aegisub.set_undo_point(script_name)
+	aegisub.set_undo_point(unretard_script_name)
 end
 
-function fix_rtl(subtitles, selected_lines, active_line)
-    local u202b = "\226\128\171"
-    local n = "\\n"
-    local N = "\\N"
-    local rbracket = "}"
-    local lbracket = "{"
-
-    local function starts_with(str, start)
-        return str:sub(1, #start) == start
-    end
-
+----- RTL -----
+function Rtl(subtitles, selected_lines, active_line)
 	for z, i in ipairs(selected_lines) do
-		local l = subtitles[i]
-		if string.match(l.text, u202b) then l.text = l.text:gsub(u202b, "") end
-		l.text = u202b .. l.text
-		if string.match(l.text, N) then l.text = l.text:gsub(N, N .. u202b) end
-		if string.match(l.text, n) then l.text = l.text:gsub(n, n .. u202b) end
-		if string.match(l.text, rbracket) then l.text = l.text:gsub(rbracket, rbracket .. u202b) end
-		if string.match(l.text, u202b..lbracket) then l.text = l.text:gsub(u202b..lbracket, lbracket) end
+        local l = subtitles[i]
+        
+        l.text = unrtl(l.text)
+        
+		l.text = rtl(l.text)
+        
 		subtitles[i] = l
 	end
-	aegisub.set_undo_point(script_name)
+	aegisub.set_undo_point(rtl_script_name)
 end
 
-aegisub.register_macro('AL Persian Toolkit/PakNevis', 'Fix your shity writing habbits! (Unretarded Lines Only)', paknevis)
-aegisub.register_macro('AL Persian Toolkit/Unretard', 'Unretard your retarted Persian typing! (Retarded Lines Only)', unretard)
-aegisub.register_macro('AL Persian Toolkit/Fix RTL', 'Fix Persian displaying issues. (Unretarded Lines Only)', fix_rtl)
+----- Un-RTL -----
+function Unrtl(subtitles, selected_lines, active_line)
+    for z, i in ipairs(selected_lines) do
+        local line = subtitles[i]
+
+        line.text = unrtl(line.text)
+
+        subtitles[i] = line
+    end
+    aegisub.set_undo_point(unrtl_script_name)
+end
+
+----- RTL Editor -----
+local editor_btn = {
+    Ok = 1,
+    OkWORtl = 2,
+    Cancel = 3,
+}
+
+local function openEditor(str)
+    local btns = {"OK", "OK w/o RTL", "Cancel"}
+
+    local btn_switch_case = {}
+    for key, value in pairs(btns) do
+        btn_switch_case[value] = key
+    end
+
+	local config = {
+		{class="label", label="Press Ctrl+Shift to switch to RTL mode.", x=0, y=0},
+		{class="textbox", name="editor", value=str, x=0, y=1, width=12, height=8}
+    }
+    local btn, result = aegisub.dialog.display(config, btns, {ok="OK", cancel="Cancel"})
+    if btn == true then btn = "OK" elseif btn == false then btn = "Cancel" end
+	return btn_switch_case[btn], result.editor
+end
+
+function RtlEditor(subtitles, selected_lines)
+	if #selected_lines > 1 then
+		return
+	end
+    local line = subtitles[selected_lines[1]]
+
+    local text = unrtl(line.text)
+	text = utf8.gsub(text, "\\[Nn]", "\n")
+	local btn, newText = openEditor(text)
+
+	if btn == editor_btn.Cancel then
+		return
+    end
+	newText = utf8.gsub(newText, "\n", "\\N")
+	if btn == editor_btn.Ok then
+        newText = rtl(newText)
+	end
+    line.text = newText
+    
+	subtitles[selected_lines[1]] = line
+
+	aegisub.set_undo_point(rtleditor_script_name)
+end
+
+----- Register Scripts -----
+aegisub.register_macro(paknevis_script_name, 'Fix your shity writing habbits! (Unretarded Lines Only)', PakNevis)
+aegisub.register_macro(unretard_script_name, 'Unretard your retarted Persian typing! (Retarded Lines Only)', Unretard)
+aegisub.register_macro(rtl_script_name, 'Fix RTL languages displaying issues. (Unretarded Lines Only)', Rtl)
+aegisub.register_macro(unrtl_script_name, 'Undo RTL function effects.', Unrtl)
+aegisub.register_macro(rtleditor_script_name, 'An editor for easy editing of RTL language lines.', RtlEditor)
