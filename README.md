@@ -30,7 +30,10 @@ Fix RTL languages displaying issues.
 Undo RTL function effects.
 ## RTL Editor (Edited version of MasafAutomation\'s RTL Editor)
 An editor for easy editing of RTL language lines.
+## Split at Tags (Based on Lyger's Split at Tags automation)
+A splitter (at tags) for RTL language lines.
 
 # Credits
 - [utf8.lua](https://github.com/Stepets/utf8.lua)
 - [MasafAutomation](https://github.com/Majid110/MasafAutomation)
+- [Lyger's Automations](https://github.com/lyger/Aegisub_automation_scripts)
