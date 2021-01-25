@@ -498,7 +498,9 @@ function SplitAtTags(subtitles, selected_lines, active_line)
                 -- reverse text
                 local match = re.match(val.text, '^(['..puncs..']*)(.*[^'..puncs..'])(['..puncs..']*)$')
                 -- aegisub.log('Matched Text:\n'..serializeTable(match)..'\n')
-                val.text = match[4].str..match[3].str..match[2].str
+                if match then
+                    val.text = match[4].str..match[3].str..match[2].str
+                end
 
                 -- rebuild line
                 line.text = line.text..val.tags..val.text
@@ -883,7 +885,9 @@ function SplitAtTags(subtitles, selected_lines, active_line)
                 -- reverse back text
                 local match = re.match(val.text, '^(['..puncs..']*)(.*[^'..puncs..'])(['..puncs..']*)$')
                 -- aegisub.log('Matched Text 2:\n'..serializeTable(match)..'\n')
-                val.text = match[4].str..match[3].str..match[2].str
+                if match then
+                    val.text = match[4].str..match[3].str..match[2].str
+                end
 
                 -- clean text
                 val.text = re.sub(val.text, '^ +', '') -- trim redundant spaces
