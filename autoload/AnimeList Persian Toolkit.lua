@@ -21,7 +21,7 @@ local re = require 'aegisub.re'
 script_name = 'AnimeList Persian Toolkit'
 script_description = 'A toolkit for easier persian fansubbing.'
 script_author = 'AnimeList Team'
-script_version = '1.2.0'
+script_version = '1.2.1'
 
 ----- Script Names -----
 local paknevis_script_name = 'AL Persian Toolkit/PakNevis'
