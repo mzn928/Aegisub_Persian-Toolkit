@@ -651,8 +651,14 @@ function SplitAtTags(subtitles, selected_lines, active_line)
 
             -- Make line table
             local line_table = {}
-            for thistag, thistext in line.text:gmatch("({[^{}]*})([^{}]*)") do
+            for thistag, space_1, thistext, space_2 in line.text:gmatch("({[^{}]*})( *)([^{}]*)( *)") do
+                if space_1 ~= "" then
+                    table.insert(line_table, {tag = thistag, text = space_1})
+                end
                 table.insert(line_table, {tag = thistag, text = thistext})
+                if space_2 ~= "" then
+                    table.insert(line_table, {tag = thistag, text = space_2})
+                end
             end
 
             -- Stores current state of the line as style table
@@ -896,8 +902,10 @@ function SplitAtTags(subtitles, selected_lines, active_line)
                 new_line.text = rebuilt_tag .. val.text
 
                 -- Insert the new line
-                sub.insert(li + lines_added + 1, new_line)
-                lines_added = lines_added + 1
+                if val.text ~= "" then
+                    sub.insert(li + lines_added + 1, new_line)
+                    lines_added = lines_added + 1
+                end
             end
         end
     end
