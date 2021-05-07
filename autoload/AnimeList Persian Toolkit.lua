@@ -21,7 +21,7 @@ local re = require 'aegisub.re'
 script_name = 'AnimeList Persian Toolkit'
 script_description = 'A toolkit for easier persian fansubbing.'
 script_author = 'AnimeList Team'
-script_version = '1.2.1'
+script_version = '1.2.2'
 
 ----- Script Names -----
 local paknevis_script_name = 'AL Persian Toolkit/PakNevis'
@@ -499,7 +499,7 @@ function SplitAtTags(subtitles, selected_lines, active_line)
                 local match = re.match(val.text, '^(['..puncs..']*)(.*[^'..puncs..'])(['..puncs..']*)$')
                 -- aegisub.log('Matched Text:\n'..serializeTable(match)..'\n')
                 if match then
-                    val.text = match[4].str..match[3].str..match[2].str
+                    val.text = utf8.reverse(match[4].str)..match[3].str..utf8.reverse(match[2].str)
                 end
 
                 -- rebuild line
@@ -892,12 +892,13 @@ function SplitAtTags(subtitles, selected_lines, active_line)
                 local match = re.match(val.text, '^(['..puncs..']*)(.*[^'..puncs..'])(['..puncs..']*)$')
                 -- aegisub.log('Matched Text 2:\n'..serializeTable(match)..'\n')
                 if match then
-                    val.text = match[4].str..match[3].str..match[2].str
+                    val.text = utf8.reverse(match[4].str)..match[3].str..utf8.reverse(match[2].str)
                 end
 
                 -- clean text
                 val.text = re.sub(val.text, '^ +', '') -- trim redundant spaces
                 val.text = re.sub(val.text, ' +$', '')
+                val.text = re.sub(val.text, '^['..RLE..' ]+$', '')
 
                 new_line.text = rebuilt_tag .. val.text
 
