@@ -450,7 +450,7 @@ function Split:reverse(line)
 
     -- make tags-text table
     local tag_text_table = expand(line.text)
-    aegisub.log('Parts:\n'..serializeTable(tag_text_table)..'\n')
+    -- aegisub.log('Parts:\n'..serializeTable(tag_text_table)..'\n')
 
     -- reverse process
     local line_tags = {}
