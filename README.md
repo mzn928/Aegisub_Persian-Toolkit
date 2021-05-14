@@ -24,14 +24,18 @@ Mentioned directories are at the locations bellow:
 Correct common mistakes in Persian text.
 ## Unretard
 Converts non-RTL typed text to RTL compatible one.
-## RTL
+## RTL/RTL
 Fix RTL languages displaying issues.
-## Un-RTL
+## RTL/Un-RTL
 Undo RTL function effects.
 ## RTL Editor (Edited version of MasafAutomation\'s RTL Editor)
 An editor for easy editing of RTL language lines.
-## Split at Tags (Based on Lyger's Split at Tags automation)
+## Split/Split at Tags (Based on Lyger's Split at Tags automation)
 A splitter (at tags) for RTL language lines.
+## Split/Split at Spaces
+You add the description! Thanks for your contribution.
+## Reverse
+You add the description! Thanks for your contribution.
 
 # Credits
 - [utf8.lua](https://github.com/Stepets/utf8.lua)
