@@ -965,7 +965,7 @@ function SplitAtSpaces(subtitles, selected_lines, active_line)
 
         for _, s in ipairs(result.splits) do
             subtitles.insert(num + lines_added + 1, s)
-            linesAdded = lines_added + 1
+            lines_added = lines_added + 1
         end
     end
 
