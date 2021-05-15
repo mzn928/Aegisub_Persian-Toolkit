@@ -43,15 +43,16 @@ local function removeRleChars(text)
     return text
 end
 
-local function rtl(text)
-    text, _ = re.sub(text, "^((?:\\{.*?\\})*)", "\\1"..RLE)
-    text, _ = re.sub(text, "(\\\\[Nn])((?:\\{.*?\\})*)", "\\1\\2"..RLE)
-    return text
-end
-
 local function unrtl(text)
     text, _ = re.sub(text, "^((?:\\{.*?\\})*)"..RLE, "\\1")
     text, _ = re.sub(text, "(\\\\[Nn])((?:\\{.*?\\})*)"..RLE, "\\1\\2")
+    return text
+end
+
+local function rtl(text)
+    text = unrtl(text)
+    text, _ = re.sub(text, "^((?:\\{.*?\\})*)", "\\1"..RLE)
+    text, _ = re.sub(text, "(\\\\[Nn])((?:\\{.*?\\})*)", "\\1\\2"..RLE)
     return text
 end
 
@@ -258,7 +259,6 @@ function Rtl(subtitles, selected_lines, active_line)
 	for z, i in ipairs(selected_lines) do
         local l = subtitles[i]
         
-        l.text = unrtl(l.text)
 		l.text = rtl(l.text)
         
 		subtitles[i] = l
@@ -329,7 +329,7 @@ end
 ----- Split at Tags -----
 local Split = {}
 
-Split.puncs = '.:!،«[(»\\])\\- '
+Split.puncs = '.:!،«[(»\\])\\- <>'
 Split.line_type_tags = {
     'pos', 'move', 'clip', 'iclip', 'org', 'fade', 'fad', 'an', 'q'
 }
@@ -493,12 +493,8 @@ function Split:reverse(line)
         end
         val.tag = rebuilt_tag
 
-        -- reverse text
-        local match = re.match(val.text, '^(['..Split.puncs..']*)(.*[^'..Split.puncs..'])(['..Split.puncs..']*)$')
-        -- aegisub.log('Matched Text:\n'..serializeTable(match)..'\n')
-        if match then
-            val.text = utf8.reverse(match[4].str)..match[3].str..utf8.reverse(match[2].str)
-        end
+        -- flip spaces
+        val.text, _ = re.sub(val.text, "^( *)(.*?)( *)$", "\\3\\2\\1")
 
         -- rebuild line
         line.text = line.text..val.tag..val.text
@@ -612,10 +608,16 @@ function Split:splitAtTags(line)
 
     local splits = {}
 
+    -- clean tags and text
+    line.text = re.sub(line.text, '}{', '') -- combine redundant back to back tag parts
+    line.text = re.sub(line.text, '^ +', '') -- trim redundant spaces
+    line.text = re.sub(line.text, '^({[^{}]*}) +', '\\1')
+    line.text = re.sub(line.text, ' +$', '')
+
     -- Read in styles and meta
     local meta, styles = karaskel.collect_head(subtitles, false)
 
-        -- Preprocess
+    -- Preprocess
     karaskel.preproc_line(subtitles, meta, styles, line)
 
     -- Get position and origin
@@ -635,14 +637,20 @@ function Split:splitAtTags(line)
     -- line.text=line.text:gsub("\n([^\n{])","\n{}%1")
 
     -- Make line table
-    local line_table = {}
-    for thistag, space_1, thistext, space_2 in line.text:gmatch("({[^{}]*})( *)([^{}]*)( *)") do
-        if space_1 ~= "" then
-            table.insert(line_table, {tag = thistag, text = space_1})
+    local line_table = expand(line.text)
+    local lines_added = 0
+    local line_table_copy = util.copy(line_table)
+    for i, e in ipairs(line_table_copy) do
+        local m = re.match(e.text, "^( *)(.*?)( *)$")
+        
+        if m[2].str ~= "" then
+            table.insert(line_table, i + lines_added, { tag = e.tag, text = rtl(m[2].str) })
+            lines_added = lines_added + 1
         end
-        table.insert(line_table, {tag = thistag, text = thistext})
-        if space_2 ~= "" then
-            table.insert(line_table, {tag = thistag, text = space_2})
+        e.text = rtl(m[3].str)
+        if m[4].str ~= "" then
+            table.insert(line_table, i + lines_added + 1, { tag = e.tag, text = rtl(m[4].str) })
+            lines_added = lines_added + 1
         end
     end
 
@@ -874,11 +882,11 @@ function Split:splitAtTags(line)
         end
 
         -- reverse back text
-        local match = re.match(val.text, '^(['..Split.puncs..']*)(.*[^'..Split.puncs..'])(['..Split.puncs..']*)$')
+        -- local match = re.match(val.text, '^(['..Split.puncs..']*)(.*[^'..Split.puncs..'])(['..Split.puncs..']*)$')
         -- aegisub.log('Matched Text 2:\n'..serializeTable(match)..'\n')
-        if match then
-            val.text = utf8.reverse(match[4].str)..match[3].str..utf8.reverse(match[2].str)
-        end
+        -- if match then
+        --     val.text = utf8.reverse(match[4].str)..match[3].str..utf8.reverse(match[2].str)
+        -- end
 
         -- clean text
         val.text = re.sub(val.text, '^ +', '') -- trim redundant spaces
@@ -971,8 +979,10 @@ function Reverse(subtitles, selected_lines, active_line)
     local lines_added = 0
     for i, n in ipairs(selected_lines) do
         local line = subtitles[n + lines_added]
+        local new_line = util.copy(line);
 
-        local reverse = Split:reverse(line);
+        new_line.text = unrtl(new_line.text);
+        local reverse = Split:reverse(new_line);
 
         line.comment = true
         subtitles[n + lines_added] = line
