@@ -998,5 +998,5 @@ aegisub.register_macro(rtl_script_name, 'Fix RTL languages displaying issues. (U
 aegisub.register_macro(unrtl_script_name, 'Undo RTL function effects.', Unrtl)
 aegisub.register_macro(rtleditor_script_name, 'An editor for easy editing of RTL language lines.', RtlEditor)
 aegisub.register_macro(split_at_tags_script_name, 'A splitter (at tags) for RTL language lines.', SplitAtTags)
-aegisub.register_macro(split_at_spaces_script_name, 'You add the description! Thanks for your contribution.', SplitAtSpaces)
-aegisub.register_macro(reverse_at_tags_script_name, 'You add the description! Thanks for your contribution.', ReverseAtTags)
+aegisub.register_macro(split_at_spaces_script_name, 'A splitter (at spaces) for RTL language lines.', SplitAtSpaces)
+aegisub.register_macro(reverse_at_tags_script_name, 'Reverse line at tags to use it with other LTR automations.', ReverseAtTags)

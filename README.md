@@ -33,9 +33,9 @@ An editor for easy editing of RTL language lines.
 ## Split / Split at Tags (Based on Lyger's Split at Tags automation)
 A splitter (at tags) for RTL language lines.
 ## Split / Split at Spaces
-You add the description! Thanks for your contribution.
+A splitter (at spaces) for RTL language lines.
 ## Split / Reverse at Tags
-You add the description! Thanks for your contribution.
+Reverse line at tags to use it with other LTR automations.
 
 # Credits
 - [utf8.lua](https://github.com/Stepets/utf8.lua)
