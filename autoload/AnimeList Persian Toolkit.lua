@@ -31,7 +31,7 @@ local unretard_script_name = 'AL Persian Toolkit/Unretard'
 local rtleditor_script_name = 'AL Persian Toolkit/RTL Editor'
 local split_at_tags_script_name = 'AL Persian Toolkit/Split/Split at Tags'
 local split_at_spaces_script_name = 'AL Persian Toolkit/Split/Split at Spaces'
-local reverse_script_name = 'AL Persian Toolkit/Reverse'
+local reverse_at_tags_script_name = 'AL Persian Toolkit/Split/Reverse at Tags'
 
 ----- Global Variables ----
 RLE = utf8.char(0x202B)
@@ -124,7 +124,6 @@ local function expand(text)
         if m[2] == nil then m[2] = { str = "" } end
         if m[3] == nil then m[3] = { str = "" } end
         table.insert(result, { tag = m[2].str, text = m[3].str })
-        -- aegisub.log(serializeTable(m).."\n")
     end
 
     return result
@@ -972,8 +971,8 @@ function SplitAtSpaces(subtitles, selected_lines, active_line)
     aegisub.set_undo_point(split_at_spaces_script_name)
 end
 
------ Reverse -----
-function Reverse(subtitles, selected_lines, active_line)
+----- Reverse at Tags -----
+function ReverseAtTags(subtitles, selected_lines, active_line)
     _G.subtitles = subtitles
 
     local lines_added = 0
@@ -989,7 +988,7 @@ function Reverse(subtitles, selected_lines, active_line)
         subtitles.insert(n + lines_added + 1, reverse)
     end
 
-    aegisub.set_undo_point(reverse_script_name)
+    aegisub.set_undo_point(reverse_at_tags_script_name)
 end
 
 ----- Register Scripts -----
@@ -1000,4 +999,4 @@ aegisub.register_macro(unrtl_script_name, 'Undo RTL function effects.', Unrtl)
 aegisub.register_macro(rtleditor_script_name, 'An editor for easy editing of RTL language lines.', RtlEditor)
 aegisub.register_macro(split_at_tags_script_name, 'A splitter (at tags) for RTL language lines.', SplitAtTags)
 aegisub.register_macro(split_at_spaces_script_name, 'You add the description! Thanks for your contribution.', SplitAtSpaces)
-aegisub.register_macro(reverse_script_name, 'You add the description! Thanks for your contribution.', Reverse)
+aegisub.register_macro(reverse_at_tags_script_name, 'You add the description! Thanks for your contribution.', ReverseAtTags)
