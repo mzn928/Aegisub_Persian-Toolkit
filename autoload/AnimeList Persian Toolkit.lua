@@ -38,23 +38,21 @@ RLE = utf8.char(0x202B)
 subtitles = nil
 
 ----- Global Functions -----
-local function removeRtlChars(s)
-    s = utf8.gsub(s, '['..RLE..']', '')
-    return s
+local function removeRleChars(text)
+    text = re.sub(text, RLE, "")
+    return text
 end
 
-local function rtl(s)
-    if '{' ~= string.sub(s, 0, 1) then
-        s = RLE..s
-    end
-    s = utf8.gsub(s, '(\\[Nn])([^\\{])', '%1'..RLE..'%2')
-    s = utf8.gsub(s, '}([^{])', '}'..RLE..'%1')
-    return s
+local function rtl(text)
+    text, _ = re.sub(text, "^((?:\\{.*?\\})*)", "\\1"..RLE)
+    text, _ = re.sub(text, "(\\\\[Nn])((?:\\{.*?\\})*)", "\\1\\2"..RLE)
+    return text
 end
 
-local function unrtl(s)
-    s = removeRtlChars(s)
-    return s
+local function unrtl(text)
+    text, _ = re.sub(text, "^((?:\\{.*?\\})*)"..RLE, "\\1")
+    text, _ = re.sub(text, "(\\\\[Nn])((?:\\{.*?\\})*)"..RLE, "\\1\\2")
+    return text
 end
 
 local function serializeTable(val, name, skipnewlines, depth)
@@ -261,7 +259,6 @@ function Rtl(subtitles, selected_lines, active_line)
         local l = subtitles[i]
         
         l.text = unrtl(l.text)
-        
 		l.text = rtl(l.text)
         
 		subtitles[i] = l
@@ -940,7 +937,7 @@ function SplitAtSpaces(subtitles, selected_lines, active_line)
         local parts = expand(line.text)
         line.text = ""
         for _, p in ipairs(parts) do
-            p.text = re.sub(p.text, "{}\\0", " +")
+            p.text, _ = re.sub(p.text, "( +)", "{}"..RLE.."\\1")
             line.text = line.text..p.tag..p.text
         end
         lines[i] = line
