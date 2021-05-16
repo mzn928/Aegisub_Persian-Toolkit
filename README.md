@@ -34,6 +34,8 @@ An editor for easy editing of RTL language lines.
 A splitter (at tags) for RTL language lines.
 ## Split / Split at Spaces
 A splitter (at spaces) for RTL language lines.
+## Split / Reverse + Split (at Tags)
+Split / Reverse at Tags + Split / Split at Tags.
 ## Split / Reverse at Tags
 Reverse line at tags to use it with other LTR automations.
 

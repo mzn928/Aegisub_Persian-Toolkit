@@ -31,6 +31,7 @@ local unretard_script_name = 'AL Persian Toolkit/Unretard'
 local rtleditor_script_name = 'AL Persian Toolkit/RTL Editor'
 local split_at_tags_script_name = 'AL Persian Toolkit/Split/Split at Tags'
 local split_at_spaces_script_name = 'AL Persian Toolkit/Split/Split at Spaces'
+local reverse_split_at_tags_script_name = 'AL Persian Toolkit/Split/Reverse + Split (at Tags)'
 local reverse_at_tags_script_name = 'AL Persian Toolkit/Split/Reverse at Tags'
 
 ----- Global Variables ----
@@ -606,6 +607,7 @@ function Split:splitAtTags(line)
     end
 
     local splits = {}
+    local line = util.copy(line)
 
     -- clean tags and text
     line.text = re.sub(line.text, '}{', '') -- combine redundant back to back tag parts
@@ -971,6 +973,27 @@ function SplitAtSpaces(subtitles, selected_lines, active_line)
     aegisub.set_undo_point(split_at_spaces_script_name)
 end
 
+----- Reverse + Split (at Tags) -----
+function ReverseSplitAtTags(subtitles, selected_lines, active_line)
+    _G.subtitles = subtitles
+
+    local lines_added = 0
+    for i, n in ipairs(selected_lines) do
+        local line = subtitles[n + lines_added]
+
+        local result = Split:splitAtTags(line);
+
+        line.comment = true
+        subtitles[n + lines_added] = line
+        for _, l in ipairs(result) do
+            subtitles.insert(n + lines_added + 1, l)
+            lines_added = lines_added + 1
+        end
+    end
+
+    aegisub.set_undo_point(reverse_split_at_tags_script_name)
+end
+
 ----- Reverse at Tags -----
 function ReverseAtTags(subtitles, selected_lines, active_line)
     _G.subtitles = subtitles
@@ -999,4 +1022,5 @@ aegisub.register_macro(unrtl_script_name, 'Undo RTL function effects.', Unrtl)
 aegisub.register_macro(rtleditor_script_name, 'An editor for easy editing of RTL language lines.', RtlEditor)
 aegisub.register_macro(split_at_tags_script_name, 'A splitter (at tags) for RTL language lines.', SplitAtTags)
 aegisub.register_macro(split_at_spaces_script_name, 'A splitter (at spaces) for RTL language lines.', SplitAtSpaces)
+aegisub.register_macro(reverse_split_at_tags_script_name, 'Split / Reverse at Tags + Split / Split at Tags.', ReverseSplitAtTags)
 aegisub.register_macro(reverse_at_tags_script_name, 'Reverse line at tags to use it with other LTR automations.', ReverseAtTags)
