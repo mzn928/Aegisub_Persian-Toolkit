@@ -114,7 +114,7 @@ end
 local function expand(text)
     local result = {}
 
-    local firstPart = re.match(text, "^([^{].*?)\\{")
+    local firstPart = re.match(text, "^([^{].*?)(?:\\{|$)")
     if firstPart ~= nil then
         table.insert(result, { tag = "", text = firstPart[2].str })
     end
