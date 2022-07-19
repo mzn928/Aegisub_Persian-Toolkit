@@ -22,6 +22,8 @@ Mentioned directories are at the locations bellow:
 # Scripts
 ## PakNevis
 Correct common mistakes in Persian text.
+## Extend Move
+Extend \move based on line's time (Created for linear signs that go outside of video boundries).
 ## Unretard
 Converts non-RTL typed text to RTL compatible one.
 ## RTL / RTL

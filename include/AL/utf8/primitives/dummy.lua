@@ -12,11 +12,6 @@
 -- * utf8gmatch(str, regex, all)
 -- * utf8gsub(str, regex, repl, limit)
 --
--- If utf8data.lua (containing the lower<->upper case mappings) is loaded, these
--- additional functions are available:
--- * utf8upper(s)
--- * utf8lower(s)
---
 -- All functions behave as their non UTF-8 aware counterparts with the exception
 -- that UTF-8 characters are used instead of bytes for all units.
 
@@ -75,6 +70,8 @@ local lower   = string.lower
 local rep     = string.rep
 local sub     = string.sub
 local upper   = string.upper
+
+local utf8charpattern = '[%z\1-\127\194-\244][\128-\191]*'
 
 local function utf8symbollen(byte)
   return not byte and 0 or (byte < 0x80 and 1) or (byte >= 0xF0 and 4) or (byte >= 0xE0 and 3) or (byte >= 0xC0 and 2) or 1
@@ -494,6 +491,33 @@ local function utf8offset(str, n, bs)
 
 end
 
+local function utf8replace (s, mapping)
+  if type(s) ~= "string" then
+    error("bad argument #1 to 'utf8replace' (string expected, got ".. type(s).. ")")
+  end
+  if type(mapping) ~= "table" then
+    error("bad argument #2 to 'utf8replace' (table expected, got ".. type(mapping).. ")")
+  end
+  local result = utf8.raw.gsub( s, utf8charpattern, mapping )
+  return result
+end
+
+local function utf8upper (s)
+  return utf8replace(s, utf8.config.conversion.lc_uc)
+end
+
+if utf8.config.conversion.lc_uc then
+  upper = utf8upper
+end
+
+local function utf8lower (s)
+  return utf8replace(s, utf8.config.conversion.uc_lc)
+end
+
+if utf8.config.conversion.uc_lc then
+  lower = utf8lower
+end
+
 utf8.len       = utf8len
 utf8.sub       = utf8sub
 utf8.reverse   = utf8reverse
@@ -514,7 +538,7 @@ for k,v in pairs(string) do
   utf8.raw[k] = v
 end
 
-utf8.charpattern = '[\0-\127\194-\244][\128-\191]*'
+utf8.charpattern = utf8charpattern
 utf8.offset = utf8offset
 if _VERSION == 'Lua 5.3' then
   local utf8_53 = require "utf8"

@@ -1,10 +1,11 @@
 -- Special thanks to Majid110 for inspiring us the great feature of RTL Editor.
 -- https://github.com/Majid110/MasafAutomation
--- Special thanks to lyger for writing base of an excelent splitter
+-- Special thanks to lyger for writing the base of an excelent splitter
 -- https://github.com/lyger/Aegisub_automation_scripts
 
 -- Authers of each section:
 -- PakNevis: SSgumS
+-- Extend Move: SSgumS
 -- RTL: Shinsekai_Yuri & SSgumS
 -- Un-RTL: Shinsekai_Yuri & SSgumS
 -- Unretard: SSgumS & MD
@@ -21,10 +22,11 @@ local re = require 'aegisub.re'
 script_name = 'AnimeList Persian Toolkit'
 script_description = 'A toolkit for easier persian fansubbing.'
 script_author = 'AnimeList Team'
-script_version = '1.2.3'
+script_version = '1.3.0'
 
 ----- Script Names -----
 local paknevis_script_name = 'AL Persian Toolkit/PakNevis'
+local extend_move_script_name = 'AL Persian Toolkit/Extend Move'
 local rtl_script_name = 'AL Persian Toolkit/RTL/RTL'
 local unrtl_script_name = 'AL Persian Toolkit/RTL/Un-RTL'
 local unretard_script_name = 'AL Persian Toolkit/Unretard'
@@ -45,15 +47,15 @@ local function removeRleChars(text)
 end
 
 local function unrtl(text)
-    text, _ = re.sub(text, "^((?:\\{.*?\\})*)"..RLE, "\\1")
-    text, _ = re.sub(text, "(\\\\[Nn])((?:\\{.*?\\})*)"..RLE, "\\1\\2")
+    text, _ = re.sub(text, "^((?:\\{.*?\\})*)" .. RLE, "\\1")
+    text, _ = re.sub(text, "(\\\\[Nn])((?:\\{.*?\\})*)" .. RLE, "\\1\\2")
     return text
 end
 
 local function rtl(text)
     text = unrtl(text)
-    text, _ = re.sub(text, "^((?:\\{.*?\\})*)", "\\1"..RLE)
-    text, _ = re.sub(text, "(\\\\[Nn])((?:\\{.*?\\})*)", "\\1\\2"..RLE)
+    text, _ = re.sub(text, "^((?:\\{.*?\\})*)", "\\1" .. RLE)
+    text, _ = re.sub(text, "(\\\\[Nn])((?:\\{.*?\\})*)", "\\1\\2" .. RLE)
     return text
 end
 
@@ -69,7 +71,7 @@ local function serializeTable(val, name, skipnewlines, depth)
         tmp = tmp .. "{" .. (not skipnewlines and "\n" or "")
 
         for k, v in pairs(val) do
-            tmp =  tmp .. serializeTable(v, k, skipnewlines, depth + 1) .. "," .. (not skipnewlines and "\n" or "")
+            tmp = tmp .. serializeTable(v, k, skipnewlines, depth + 1) .. "," .. (not skipnewlines and "\n" or "")
         end
 
         tmp = tmp .. string.rep(" ", depth) .. "}"
@@ -130,6 +132,13 @@ local function expand(text)
     return result
 end
 
+-- source: https://github.com/unanimated/luaegisub/blob/master/ua.Relocator.lua#L2555
+local function round(n, dec)
+    dec = dec or 0
+    n = math.floor(n * 10 ^ dec + 0.5) / 10 ^ dec
+    return n
+end
+
 ----- PakNevis -----
 function PakNevis(subtitles, selected_lines, active_line)
     -- local translation_src = ' كي“”0123456789?⸮,’‘ﺑﺗﺛﺟﺣﺧﺳﺷﺻﺿﻃﻇﻋﻏﻓﻗﻛﻟﻣﻧﻫﻳﺋﺍﺏﺕﺙﺝﺡﺥﺩﺫﺭﺯﺱﺵﺹﺽﻁﻅﻉﻍﻑﻕﻙﻝﻡﻥﻩﻭﻱﺁﺃﺅﺇﺉˈﯿٱھ《》'
@@ -140,7 +149,7 @@ function PakNevis(subtitles, selected_lines, active_line)
     local punc_after = '%.:!،؛؟»%]%)'
     local punc_before = '«%[%('
 
-	for z, i in ipairs(selected_lines) do
+    for z, i in ipairs(selected_lines) do
         local line = subtitles[i]
         -- translation
         -- for j = 0, translation_src:len() do
@@ -158,27 +167,37 @@ function PakNevis(subtitles, selected_lines, active_line)
         -- line.text = utf8.gsub(line.text, '-(\\[Nn])', '–%1') -- replace ending - with –
         -- line.text = utf8.gsub(line.text, '-$', '–') -- replace ending - with –
         -- punctuation spacing patterns
-        line.text = utf8.gsub(line.text, ' (['..punc_after..'])', '%1') -- remove space before
-        line.text = utf8.gsub(line.text, '(['..punc_before..']) ', '%1') -- remove space after
-        line.text = utf8.gsub(line.text, '([^%d'..persian_digits..']%.)([^ '..punc_after..'])', '%1 %2') -- put space after .
-        line.text = utf8.gsub(line.text, '([%d'..persian_digits..']%.)([^ %d'..persian_digits..punc_after..'])', '%1 %2') -- put space after .
-        line.text = utf8.gsub(line.text, '(['..punc_after:sub(3)..'])([^ '..punc_after..'])', '%1 %2') -- put space after
-        line.text = utf8.gsub(line.text, '([^ '..punc_before..'])(['..punc_before..'])', '%1 %2') -- put space before
+        line.text = utf8.gsub(line.text, ' ([' .. punc_after .. '])', '%1') -- remove space before
+        line.text = utf8.gsub(line.text, '([' .. punc_before .. ']) ', '%1') -- remove space after
+        line.text = utf8.gsub(line.text, '([^%d' .. persian_digits .. ']%.)([^ ' .. punc_after .. '])', '%1 %2') -- put space after .
+        line.text = utf8.gsub(line.text, '([%d' .. persian_digits .. ']%.)([^ %d' .. persian_digits .. punc_after .. '])'
+            , '%1 %2') -- put space after .
+        line.text = utf8.gsub(line.text, '([' .. punc_after:sub(3) .. '])([^ ' .. punc_after .. '])', '%1 %2') -- put space after
+        line.text = utf8.gsub(line.text, '([^ ' .. punc_before .. '])([' .. punc_before .. '])', '%1 %2') -- put space before
         -- affix spacing patterns
         line.text = utf8.gsub(line.text, '([^ ]ه) ی ', '%1‌ی ') -- fix ی space
         line.text = utf8.gsub(line.text, ' (ن?می) ', ' %1‌') -- put zwnj after می, نمی
         line.text = utf8.gsub(line.text, '^(ن?می) ', '%1‌') -- put zwnj after می, نمی
-        line.text = utf8.gsub(line.text, '(['..persian_alphabets..']['..persian_alphabets..']) (های?)([^'..persian_alphabets..'])', '%1‌%2%3') -- put zwnj before تر, تری, ترین, گر, گری, ها, های
-        line.text = utf8.gsub(line.text, '(['..persian_alphabets..']['..persian_alphabets..']) (گری?)([^'..persian_alphabets..'])', '%1‌%2%3') -- put zwnj before تر, تری, ترین, گر, گری, ها, های
-        line.text = utf8.gsub(line.text, '(['..persian_alphabets..']['..persian_alphabets..']) (تری?ن?)([^'..persian_alphabets..'])', '%1‌%2%3') -- put zwnj before تر, تری, ترین, گر, گری, ها, های
-        line.text = utf8.gsub(line.text, '(['..persian_alphabets..']['..persian_alphabets..']) (های?)$', '%1‌%2') -- put zwnj before تر, تری, ترین, گر, گری, ها, های
-        line.text = utf8.gsub(line.text, '(['..persian_alphabets..']['..persian_alphabets..']) (گری?)$', '%1‌%2') -- put zwnj before تر, تری, ترین, گر, گری, ها, های
-        line.text = utf8.gsub(line.text, '(['..persian_alphabets..']['..persian_alphabets..']) (تری?ن?)$', '%1‌%2') -- put zwnj before تر, تری, ترین, گر, گری, ها, های
-        line.text = utf8.gsub(line.text, '([^ ]ه) (ا[میشنت][مد]?)([^'..persian_alphabets..'])', '%1‌%2%3') -- join ام, ایم, اش, اند, ای, اید, ات
+        line.text = utf8.gsub(line.text,
+            '([' .. persian_alphabets .. '][' .. persian_alphabets .. ']) (های?)([^' .. persian_alphabets .. '])',
+            '%1‌%2%3') -- put zwnj before تر, تری, ترین, گر, گری, ها, های
+        line.text = utf8.gsub(line.text,
+            '([' .. persian_alphabets .. '][' .. persian_alphabets .. ']) (گری?)([^' .. persian_alphabets .. '])',
+            '%1‌%2%3') -- put zwnj before تر, تری, ترین, گر, گری, ها, های
+        line.text = utf8.gsub(line.text,
+            '([' .. persian_alphabets .. '][' .. persian_alphabets .. ']) (تری?ن?)([^' .. persian_alphabets .. '])',
+            '%1‌%2%3') -- put zwnj before تر, تری, ترین, گر, گری, ها, های
+        line.text = utf8.gsub(line.text, '([' .. persian_alphabets .. '][' .. persian_alphabets .. ']) (های?)$',
+            '%1‌%2') -- put zwnj before تر, تری, ترین, گر, گری, ها, های
+        line.text = utf8.gsub(line.text, '([' .. persian_alphabets .. '][' .. persian_alphabets .. ']) (گری?)$',
+            '%1‌%2') -- put zwnj before تر, تری, ترین, گر, گری, ها, های
+        line.text = utf8.gsub(line.text, '([' .. persian_alphabets .. '][' .. persian_alphabets .. ']) (تری?ن?)$',
+            '%1‌%2') -- put zwnj before تر, تری, ترین, گر, گری, ها, های
+        line.text = utf8.gsub(line.text, '([^ ]ه) (ا[میشنت][مد]?)([^' .. persian_alphabets .. '])', '%1‌%2%3') -- join ام, ایم, اش, اند, ای, اید, ات
         line.text = utf8.gsub(line.text, '([^ ]ه) (ا[میشنت][مد]?)$', '%1‌%2') -- join ام, ایم, اش, اند, ای, اید, ات
-		subtitles[i] = line
-	end
-	aegisub.set_undo_point(paknevis_script_name)
+        subtitles[i] = line
+    end
+    aegisub.set_undo_point(paknevis_script_name)
 end
 
 ----- Unretard -----
@@ -230,40 +249,48 @@ function Unretard(subtitles, selected_lines, active_line)
             -- unretard
             -- find
             local linetext_copy = line.text
-            line.text = utf8.gsub(line.text, '^(['..ending_punc..']+)([^\\]+)$', '%2gce') -- ending puncs
-            line.text = utf8.gsub(line.text, '^(['..ending_punc..']+)([^\\]+)(\\[Nn])', '%2gce%3') -- ending puncs
-            line.text = utf8.gsub(line.text, '(\\[Nn])(['..ending_punc..']+)([^\\]+)(\\[Nn])', '%1%3gce%4') -- ending puncs
-            line.text = utf8.gsub(line.text, '(\\[Nn])(['..ending_punc..']+)([^\\]+)$', '%1%3gce') -- ending puncs
-            line.text = utf8.gsub(line.text, '^([^\\]+[^'..starting_punc..'])(['..starting_punc..']+)(g?c?e?)$', 'gcs%1%3') -- starting puncs
-            line.text = utf8.gsub(line.text, '^([^\\]+[^'..starting_punc..'])(['..starting_punc..']+)(g?c?e?)(\\[Nn])', 'gcs%1%3%4') -- starting puncs
-            line.text = utf8.gsub(line.text, '(\\[Nn])([^\\]+[^'..starting_punc..'])(['..starting_punc..']+)(g?c?e?)(\\[Nn])', '%1gcs%2%4%5') -- starting puncs
-            line.text = utf8.gsub(line.text, '(\\[Nn])([^\\]+[^'..starting_punc..'])(['..starting_punc..']+)(g?c?e?)$', '%1gcs%2%3') -- starting puncs
+            line.text = utf8.gsub(line.text, '^([' .. ending_punc .. ']+)([^\\]+)$', '%2gce') -- ending puncs
+            line.text = utf8.gsub(line.text, '^([' .. ending_punc .. ']+)([^\\]+)(\\[Nn])', '%2gce%3') -- ending puncs
+            line.text = utf8.gsub(line.text, '(\\[Nn])([' .. ending_punc .. ']+)([^\\]+)(\\[Nn])', '%1%3gce%4') -- ending puncs
+            line.text = utf8.gsub(line.text, '(\\[Nn])([' .. ending_punc .. ']+)([^\\]+)$', '%1%3gce') -- ending puncs
+            line.text = utf8.gsub(line.text, '^([^\\]+[^' .. starting_punc .. '])([' .. starting_punc .. ']+)(g?c?e?)$',
+                'gcs%1%3') -- starting puncs
+            line.text = utf8.gsub(line.text, '^([^\\]+[^' .. starting_punc ..
+                '])([' .. starting_punc .. ']+)(g?c?e?)(\\[Nn])', 'gcs%1%3%4') -- starting puncs
+            line.text = utf8.gsub(line.text,
+                '(\\[Nn])([^\\]+[^' .. starting_punc .. '])([' .. starting_punc .. ']+)(g?c?e?)(\\[Nn])', '%1gcs%2%4%5') -- starting puncs
+            line.text = utf8.gsub(line.text, '(\\[Nn])([^\\]+[^' .. starting_punc ..
+                '])([' .. starting_punc .. ']+)(g?c?e?)$', '%1gcs%2%3') -- starting puncs
             -- replace
-            line.text = replace(linetext_copy, line.text, '^(['..ending_punc..']+)[^\\]+$', 'gce')
-            line.text = replace(linetext_copy, line.text, '^(['..ending_punc..']+)[^\\]+\\[Nn]', 'gce')
-            line.text = replace(linetext_copy, line.text, '\\[Nn](['..ending_punc..']+)[^\\]+\\[Nn]', 'gce')
-            line.text = replace(linetext_copy, line.text, '\\[Nn](['..ending_punc..']+)[^\\]+$', 'gce')
-            line.text = replace(linetext_copy, line.text, '^[^\\]+[^'..starting_punc..'](['..starting_punc..']+)$', 'gcs')
-            line.text = replace(linetext_copy, line.text, '^[^\\]+[^'..starting_punc..'](['..starting_punc..']+)\\[Nn]', 'gcs')
-            line.text = replace(linetext_copy, line.text, '\\[Nn][^\\]+[^'..starting_punc..'](['..starting_punc..']+)\\[Nn]', 'gcs')
-            line.text = replace(linetext_copy, line.text, '\\[Nn][^\\]+[^'..starting_punc..'](['..starting_punc..']+)$', 'gcs')
+            line.text = replace(linetext_copy, line.text, '^([' .. ending_punc .. ']+)[^\\]+$', 'gce')
+            line.text = replace(linetext_copy, line.text, '^([' .. ending_punc .. ']+)[^\\]+\\[Nn]', 'gce')
+            line.text = replace(linetext_copy, line.text, '\\[Nn]([' .. ending_punc .. ']+)[^\\]+\\[Nn]', 'gce')
+            line.text = replace(linetext_copy, line.text, '\\[Nn]([' .. ending_punc .. ']+)[^\\]+$', 'gce')
+            line.text = replace(linetext_copy, line.text, '^[^\\]+[^' .. starting_punc .. ']([' .. starting_punc ..
+                ']+)$', 'gcs')
+            line.text = replace(linetext_copy, line.text, '^[^\\]+[^' .. starting_punc ..
+                ']([' .. starting_punc .. ']+)\\[Nn]', 'gcs')
+            line.text = replace(linetext_copy, line.text,
+                '\\[Nn][^\\]+[^' .. starting_punc .. ']([' .. starting_punc .. ']+)\\[Nn]', 'gcs')
+            line.text = replace(linetext_copy, line.text, '\\[Nn][^\\]+[^' .. starting_punc ..
+                ']([' .. starting_punc .. ']+)$', 'gcs')
         end
 
-		subtitles[i] = line
-	end
-	aegisub.set_undo_point(unretard_script_name)
+        subtitles[i] = line
+    end
+    aegisub.set_undo_point(unretard_script_name)
 end
 
 ----- RTL -----
 function Rtl(subtitles, selected_lines, active_line)
-	for z, i in ipairs(selected_lines) do
+    for z, i in ipairs(selected_lines) do
         local l = subtitles[i]
-        
-		l.text = rtl(l.text)
-        
-		subtitles[i] = l
-	end
-	aegisub.set_undo_point(rtl_script_name)
+
+        l.text = rtl(l.text)
+
+        subtitles[i] = l
+    end
+    aegisub.set_undo_point(rtl_script_name)
 end
 
 ----- Un-RTL -----
@@ -286,44 +313,45 @@ local editor_btn = {
 }
 
 local function openEditor(str)
-    local btns = {"OK", "OK w/o RTL", "Cancel"}
+    local btns = { "OK", "OK w/o RTL", "Cancel" }
 
     local btn_switch_case = {}
     for key, value in pairs(btns) do
         btn_switch_case[value] = key
     end
 
-	local config = {
-		{class="label", label="Press Ctrl+Shift at the right side of your keyboard to switch to RTL mode.", x=0, y=0},
-		{class="textbox", name="editor", value=str, x=0, y=1, width=33, height=11}
+    local config = {
+        { class = "label", label = "Press Ctrl+Shift at the right side of your keyboard to switch to RTL mode.", x = 0,
+            y = 0 },
+        { class = "textbox", name = "editor", value = str, x = 0, y = 1, width = 33, height = 11 }
     }
-    local btn, result = aegisub.dialog.display(config, btns, {ok="OK", cancel="Cancel"})
+    local btn, result = aegisub.dialog.display(config, btns, { ok = "OK", cancel = "Cancel" })
     if btn == true then btn = "OK" elseif btn == false then btn = "Cancel" end
-	return btn_switch_case[btn], result.editor
+    return btn_switch_case[btn], result.editor
 end
 
 function RtlEditor(subtitles, selected_lines)
-	if #selected_lines > 1 then
-		return
-	end
+    if #selected_lines > 1 then
+        return
+    end
     local line = subtitles[selected_lines[1]]
 
     local text = unrtl(line.text)
-	text = utf8.gsub(text, "\\[Nn]", "\n")
-	local btn, newText = openEditor(text)
+    text = utf8.gsub(text, "\\[Nn]", "\n")
+    local btn, newText = openEditor(text)
 
-	if btn == editor_btn.Cancel then
-		return
+    if btn == editor_btn.Cancel then
+        return
     end
-	newText = utf8.gsub(newText, "\n", "\\N")
-	if btn == editor_btn.Ok then
+    newText = utf8.gsub(newText, "\n", "\\N")
+    if btn == editor_btn.Ok then
         newText = rtl(newText)
-	end
+    end
     line.text = newText
-    
-	subtitles[selected_lines[1]] = line
 
-	aegisub.set_undo_point(rtleditor_script_name)
+    subtitles[selected_lines[1]] = line
+
+    aegisub.set_undo_point(rtleditor_script_name)
 end
 
 ----- Split at Tags -----
@@ -343,11 +371,11 @@ Split.non_style_tags = {
     'pos', 'move', 'org', 'fad', 'fade', 't', 'clip', 'iclip', 'p', 'pbo'
 }
 Split.style_names_tags = {
-    {'fontname','fn'}, {'fontsize','fs'},
-    {'color1','1c','1a'}, {'color2','2c','2a'}, {'color3','3c','3a'}, {'color4','4c','4a'},
-    {'bold','b'}, {'italic','i'}, {'underline','u'}, {'strikeout','s'},
-    {'scale_x','fscx'}, {'scale_y','fscy'}, {'spacing','fsp'}, {'angle','frz'},
-    {'outline','bord'}, {'shadow','shad'}, {'align','an'}, {'encoding','fe'}
+    { 'fontname', 'fn' }, { 'fontsize', 'fs' },
+    { 'color1', '1c', '1a' }, { 'color2', '2c', '2a' }, { 'color3', '3c', '3a' }, { 'color4', '4c', '4a' },
+    { 'bold', 'b' }, { 'italic', 'i' }, { 'underline', 'u' }, { 'strikeout', 's' },
+    { 'scale_x', 'fscx' }, { 'scale_y', 'fscy' }, { 'spacing', 'fsp' }, { 'angle', 'frz' },
+    { 'outline', 'bord' }, { 'shadow', 'shad' }, { 'align', 'an' }, { 'encoding', 'fe' }
 }
 Split.simple_text_value_tags = {
     'fn', 'alpha', '1a', '2a', '3a', '4a', 'c', '1c', '2c', '3c', '4c', 'r'
@@ -391,11 +419,11 @@ end
 
 function Split:parse_tags(tags, line_tags, current_appearance) -- TODO: add r support
     -- handle t tags
-    local t_tags={}
+    local t_tags = {}
     for t in tags:gmatch("\\t%b()") do -- Thanks lyger!
         table.insert(t_tags, t)
     end
-    tags = tags:gsub("\\t%b()","") -- remove t tags
+    tags = tags:gsub("\\t%b()", "") -- remove t tags
     if #t_tags > 0 then -- add to table
         current_appearance["t"] = t_tags
     end
@@ -480,15 +508,15 @@ function Split:reverse(line)
         for tag, value in pairs(diff) do
             if tag == "t" then
                 for _, t_tag in ipairs(value) do
-                    rebuilt_tag = rebuilt_tag:gsub("}", t_tag.."}")
+                    rebuilt_tag = rebuilt_tag:gsub("}", t_tag .. "}")
                 end
             else
-                rebuilt_tag = rebuilt_tag:gsub("{","{\\"..tag..value)
+                rebuilt_tag = rebuilt_tag:gsub("{", "{\\" .. tag .. value)
             end
         end
         if i == #tag_text_table then
             for tag, value in pairs(line_tags) do
-                rebuilt_tag = rebuilt_tag:gsub("{","{\\"..tag..value)
+                rebuilt_tag = rebuilt_tag:gsub("{", "{\\" .. tag .. value)
             end
         end
         val.tag = rebuilt_tag
@@ -497,7 +525,7 @@ function Split:reverse(line)
         val.text, _ = re.sub(val.text, "^( *)(.*?)( *)$", "\\3\\2\\1")
 
         -- rebuild line
-        line.text = line.text..val.tag..val.text
+        line.text = line.text .. val.tag .. val.text
     end
 
     return line
@@ -538,8 +566,8 @@ function Split:splitAtTags(line)
                             posx = line.eff_margin_l
                         elseif _temp == 2 then
                             posx = line.eff_margin_l +
-                                    (vid_x - line.eff_margin_l -
-                                        line.eff_margin_r) / 2
+                                (vid_x - line.eff_margin_l -
+                                    line.eff_margin_r) / 2
                         else
                             posx = vid_x - line.eff_margin_r
                         end
@@ -560,8 +588,8 @@ function Split:splitAtTags(line)
                         posx = line.eff_margin_l
                     elseif _temp == 2 then
                         posx = line.eff_margin_l +
-                                (vid_x - line.eff_margin_l - line.eff_margin_r) /
-                                2
+                            (vid_x - line.eff_margin_l - line.eff_margin_r) /
+                            2
                     else
                         posx = vid_x - line.eff_margin_r
                     end
@@ -643,7 +671,7 @@ function Split:splitAtTags(line)
     local line_table_copy = util.copy(line_table)
     for i, e in ipairs(line_table_copy) do
         local m = re.match(e.text, "^( *)(.*?)( *)$")
-        
+
         if m[2].str ~= "" then
             table.insert(line_table, i + lines_added, { tag = e.tag, text = rtl(m[2].str) })
             lines_added = lines_added + 1
@@ -677,15 +705,15 @@ function Split:splitAtTags(line)
         -- Fix style tables to reflect override tags
         current_style.fontname = subtable["fn"] or current_style.fontname
         current_style.fontsize = tonumber(subtable["fs"]) or
-                                    current_style.fontsize
+            current_style.fontsize
         current_style.scale_x = tonumber(subtable["fscx"]) or
-                                    current_style.scale_x
+            current_style.scale_x
         current_style.scale_y = tonumber(subtable["fscy"]) or
-                                    current_style.scale_y
+            current_style.scale_y
         current_style.spacing = tonumber(subtable["fsp"]) or
-                                    current_style.spacing
+            current_style.spacing
         current_style.align = tonumber(subtable["an"]) or
-                                current_style.align
+            current_style.align
         if subtable["b"] ~= nil then
             if subtable["b"] == "1" then
                 current_style.bold = true
@@ -718,7 +746,7 @@ function Split:splitAtTags(line)
         -- Get extents of the section. _sdesc is not used
         -- Temporarily remove all newlines first
         local swidth, sheight, _sdesc, sext =
-            aegisub.text_extents(current_style, val.text:gsub("\n", ""))
+        aegisub.text_extents(current_style, val.text:gsub("\n", ""))
 
         -- aegisub.log("Text: %s\n--w: %.3f\n--h: %.3f\n--d: %.3f\n--el: %.3f\n\n",
         --	val.text, swidth, sheight, _sdesc, sext)
@@ -727,7 +755,7 @@ function Split:splitAtTags(line)
         cum_width = cum_width + swidth
 
         -- Total height of the line
-        local theight=0
+        local theight = 0
 
         -- Handle tasks for a line that has a newline
         --[[if val.text:match("\n")~=nil then
@@ -863,7 +891,7 @@ function Split:splitAtTags(line)
 
         -- Start rebuilding text
         local rebuilt_tag = string.format("{\\pos(%s,%s)}", float2str(new_x),
-                                    float2str(py))
+            float2str(py))
 
         -- Add the remaining tags
         for tag, param in pairs(current_subtable) do
@@ -878,8 +906,8 @@ function Split:splitAtTags(line)
 
         if do_org then
             rebuilt_tag = rebuilt_tag:gsub("{", string.format(
-                                            "{\\org(%s,%s)",
-                                            float2str(ox), float2str(oy)))
+                "{\\org(%s,%s)",
+                float2str(ox), float2str(oy)))
         end
 
         -- reverse back text
@@ -892,7 +920,7 @@ function Split:splitAtTags(line)
         -- clean text
         val.text = re.sub(val.text, '^ +', '') -- trim redundant spaces
         val.text = re.sub(val.text, ' +$', '')
-        val.text = re.sub(val.text, '^['..RLE..' ]+$', '')
+        val.text = re.sub(val.text, '^[' .. RLE .. ' ]+$', '')
 
         new_line.text = rebuilt_tag .. val.text
 
@@ -946,8 +974,8 @@ function SplitAtSpaces(subtitles, selected_lines, active_line)
         local parts = expand(line.text)
         line.text = ""
         for _, p in ipairs(parts) do
-            p.text, _ = re.sub(p.text, "( +)", "{}"..RLE.."\\1")
-            line.text = line.text..p.tag..p.text
+            p.text, _ = re.sub(p.text, "( +)", "{}" .. RLE .. "\\1")
+            line.text = line.text .. p.tag .. p.text
         end
         lines[i] = line
     end
@@ -1014,13 +1042,55 @@ function ReverseAtTags(subtitles, selected_lines, active_line)
     aegisub.set_undo_point(reverse_at_tags_script_name)
 end
 
+----- Extend Move -----
+function ExtendMove(subtitles, selected_lines, active_line)
+    for _, i in ipairs(selected_lines) do
+        local line = subtitles[i]
+
+        line.text = utf8.gsub(line.text,
+            "\\move%(([%d%.%-]*),([%d%.%-]*),([%d%.%-]*),([%d%.%-]*),([%d%.%-]*),([%d%.%-]*)%)",
+            function(x1, y1, x2, y2, t1, t2)
+                local f1 = aegisub.frame_from_ms(line.start_time + t1)
+                if f1 ~= nil then
+                    t1 = aegisub.ms_from_frame(f1)
+                    local f2 = aegisub.frame_from_ms(line.start_time + t2)
+                    t2 = aegisub.ms_from_frame(f2)
+                end
+                local dt = t2 - t1
+                local dxdt = (x2 - x1) / dt
+                local dydt = (y2 - y1) / dt
+
+                local s = aegisub.ms_from_frame(aegisub.frame_from_ms(line.start_time))
+                local e = aegisub.ms_from_frame(aegisub.frame_from_ms(line.end_time))
+                local ds = t1 - s
+                local de = e - t2
+                if ds < 0 then ds = 0 end
+                if de < 0 then de = 0 end
+
+                x1 = round(x1 - ds * dxdt, 2)
+                x2 = round(x2 + de * dxdt, 2)
+                y1 = round(y1 - ds * dydt, 2)
+                y2 = round(y2 + de * dydt, 2)
+
+                return "\\move(" .. x1 .. "," .. y1 .. "," .. x2 .. "," .. y2 .. ")"
+            end)
+
+        subtitles[i] = line
+    end
+
+    aegisub.set_undo_point(extend_move_script_name)
+end
+
 ----- Register Scripts -----
 aegisub.register_macro(paknevis_script_name, 'Fix your shity writing habbits! (Unretarded Lines Only)', PakNevis)
+aegisub.register_macro(extend_move_script_name, 'Extend \\move based on line\'s time.', ExtendMove)
 aegisub.register_macro(unretard_script_name, 'Unretard your retarted Persian typing! (Retarded Lines Only)', Unretard)
 aegisub.register_macro(rtl_script_name, 'Fix RTL languages displaying issues. (Unretarded Lines Only)', Rtl)
 aegisub.register_macro(unrtl_script_name, 'Undo RTL function effects.', Unrtl)
 aegisub.register_macro(rtleditor_script_name, 'An editor for easy editing of RTL language lines.', RtlEditor)
 aegisub.register_macro(split_at_tags_script_name, 'A splitter (at tags) for RTL language lines.', SplitAtTags)
 aegisub.register_macro(split_at_spaces_script_name, 'A splitter (at spaces) for RTL language lines.', SplitAtSpaces)
-aegisub.register_macro(reverse_split_at_tags_script_name, 'Split / Reverse at Tags + Split / Split at Tags.', ReverseSplitAtTags)
-aegisub.register_macro(reverse_at_tags_script_name, 'Reverse line at tags to use it with other LTR automations.', ReverseAtTags)
+aegisub.register_macro(reverse_split_at_tags_script_name, 'Split / Reverse at Tags + Split / Split at Tags.',
+    ReverseSplitAtTags)
+aegisub.register_macro(reverse_at_tags_script_name, 'Reverse line at tags to use it with other LTR automations.',
+    ReverseAtTags)
