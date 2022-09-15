@@ -22,7 +22,7 @@ local re = require 'aegisub.re'
 script_name = 'AnimeList Persian Toolkit'
 script_description = 'A toolkit for easier persian fansubbing.'
 script_author = 'AnimeList Team'
-script_version = '1.3.0'
+script_version = '1.3.1'
 
 ----- Script Names -----
 local paknevis_script_name = 'AL Persian Toolkit/PakNevis'
@@ -545,7 +545,7 @@ function Split:splitAtTags(line)
             if posx == nil then
                 local _, _, align_n = line.text:find("\\an([%d%.%-]*)")
                 if align_n == nil then
-                    local _, _, align_dumb = line.text:find("\\a([%d%.%-]*)")
+                    local _, _, align_dumb = line.text:find("\\a([%d]+)")
                     if align_dumb == nil then
                         -- If the line has no alignment tags
                         posx = line.x
