@@ -28,6 +28,7 @@ script_version = '1.3.1'
 local paknevis_script_name = 'AL Persian Toolkit/PakNevis'
 local extend_move_script_name = 'AL Persian Toolkit/Extend Move'
 local rtl_script_name = 'AL Persian Toolkit/RTL/RTL'
+local rtlwo_reverse_script_name = 'AL Persian Toolkit/RTL/RTL (wo Reverse)'
 local unrtl_script_name = 'AL Persian Toolkit/RTL/Un-RTL'
 local unretard_script_name = 'AL Persian Toolkit/Unretard'
 local rtleditor_script_name = 'AL Persian Toolkit/RTL Editor'
@@ -37,7 +38,10 @@ local reverse_split_at_tags_script_name = 'AL Persian Toolkit/Split/Reverse + Sp
 local reverse_at_tags_script_name = 'AL Persian Toolkit/Split/Reverse at Tags'
 
 ----- Global Variables ----
+LRM = utf8.char(0x200E)
 RLE = utf8.char(0x202B)
+RLM = utf8.char(0x200F)
+PDF = utf8.char(0x202C)
 subtitles = nil
 
 ----- Global Functions -----
@@ -282,27 +286,104 @@ function Unretard(subtitles, selected_lines, active_line)
 end
 
 ----- RTL -----
-function Rtl(subtitles, selected_lines, active_line)
-    for z, i in ipairs(selected_lines) do
-        local l = subtitles[i]
+function Rtl(sub, sel, act)
+    fixinline(sub, sel, act)
+    for z, i in ipairs(sel) do
+        local l = sub[i]
+        text = l.text
 
-        l.text = rtl(l.text)
+        text = text:gsub("££££££££££",LRM)
+        :gsub("₩₩₩₩₩₩₩₩₩₩",RLE)
+        :gsub("€€€€€€€€€€",RLM)
+        :gsub("¥¥¥¥¥¥¥¥¥¥",PDF)
 
-        subtitles[i] = l
+        l.text = text
+        sub[i] = l
     end
     aegisub.set_undo_point(rtl_script_name)
 end
 
 ----- Un-RTL -----
-function Unrtl(subtitles, selected_lines, active_line)
-    for z, i in ipairs(selected_lines) do
-        local line = subtitles[i]
+function Unrtl(sub, sel, act)
+    for z, i in ipairs(sel) do
+        local line = sub[i]
+        text = line.text
 
-        line.text = unrtl(line.text)
+        text=text:gsub("{([^\\{}]-)}","《《%1》》")
+        if text:match("}[^{}]+{") then
+            fixinline(sub, {i}, act)
+        end
+    end
+    for zz, ii in ipairs(sel) do
+        local line = sub[ii]
+        text = line.text
 
-        subtitles[i] = line
+        text = text:gsub("££££££££££","")
+        :gsub("₩₩₩₩₩₩₩₩₩₩","")
+        :gsub("€€€€€€€€€€","")
+        :gsub("¥¥¥¥¥¥¥¥¥¥","")
+        :gsub(LRM, "")
+        :gsub(RLE , "")
+        :gsub(RLM, "")
+        :gsub(PDF, "")
+
+        line.text = text
+        sub[ii] = line
     end
     aegisub.set_undo_point(unrtl_script_name)
+end
+
+----- RTL (w/o Reverse) -----
+function rtlwo_reverse(sub, sel, act)
+    for z, i in ipairs(sel) do
+        local line = sub[i]
+        text1 = line.text
+        text1 = text1:gsub("{([^\\{}]-)}","《《%1》》")
+        text = (text1:match("^{") == nil) and "{}" .. text1 or text1
+
+        text = text:gsub("}([^{]+)", "}"..LRM..RLE.."%1"..RLM..PDF)
+        :gsub("\\N", RLM..PDF.."\\N"..LRM..RLE)
+        tablo = {}
+        for tg, tx in text:gmatch("({[^}]*})([^{]*)") do
+            table.insert(tablo, { tag = tg, text = tx})
+        end
+        local warp = nil
+        for q = 1,#sub do
+            if sub[q].class == "info" then
+                local qq = sub[q]
+                if qq.key == "WrapStyle" then
+                    warp = qq.value
+                    break
+                end
+            end
+        end
+        if warp ~= nil and tablo[1].tag:match("\\q") == nil then
+            tablo[1].tag=tablo[1].tag:gsub("{","{\\q"..warp)
+        end
+        for wq = 1,#tablo do
+            if tablo[wq].text:match("\\n") then
+                for wwq = wq,1,-1 do
+                    if tablo[wwq].tag:match("\\q") then
+                        if tablo[wwq].tag:match("\\q2") then
+                            tablo[wq].text=tablo[wq].text:gsub("\\n",RLM..PDF.."\\n"..LRM..RLE)
+                        end
+                        break
+                    end
+                end
+            end
+        end
+        tablo[1].tag=tablo[1].tag:gsub("{\\q"..warp,"{")
+        stext = ""
+        for s = 1,#tablo do
+            stext = stext .. tablo[s].tag .. tablo[s].text
+        end
+        stext = stext:gsub("{}","")
+        :gsub("《《([^\\{}]-)》》","{%1}")
+
+        line.text = stext
+        sub[i] = line
+    end
+    aegisub.set_undo_point(rtlwo_reverse_script_name)
 end
 
 ----- RTL Editor -----
@@ -1081,11 +1162,880 @@ function ExtendMove(subtitles, selected_lines, active_line)
     aegisub.set_undo_point(extend_move_script_name)
 end
 
+function fixinline(sub, sel, act)
+  local meta,styles=karaskel.collect_head(sub,false)
+  for si, li in ipairs(sel) do
+    local line = sub[li]
+    karaskel.preproc_line(sub,meta,styles,line)
+    style1 = line.style
+    text1 = line.text
+    text1 = text1:gsub("{([^\\{}]-)}","《《%1》》")
+    otext = (text1:match("^{") == nil) and "{}" .. text1 or text1
+    otext = otext:gsub("}{","")
+    :gsub(LRM, "")
+    :gsub(RLE , "")
+    :gsub(RLM, "")
+    :gsub(PDF, "")
+    :gsub("\\c&","\\1c&")
+    :gsub("\\fr([^xyz])","\\frz%1")
+    :gsub("\\r([\\}])","\\r"..style1.."%1")
+    :gsub("\\s([01])","\\str%1")
+    :gsub("\\i([01])","\\ita%1")
+    :gsub("\\fs([%d%.])","\\fsize%1")
+    :gsub("\\b(%d)","\\bold%1")
+    :gsub("\\a(%d)","\\alig%1")
+    :gsub("\\p(%d)","\\pic%1")
+    :gsub("\\N","\\N\\N")
+    otext=otext:gsub("(\\t%([^\\%(%)]-)(\\[^%(%)]-)(\\i?clip%([^%)]-%))([^%)]-%))","%1%2%4%1%3%)")
+    :gsub("(\\t%([^\\%(%)]-)(\\i?clip%([^%)]-%))(\\[^%)]-%))","%1%3%1%2%)")
+    :gsub("(\\t%([^%(%)]-)%(([^%)]-)%)([^%)]-%))","%1#%2%$%3")
+    trnsfrm=""
+    for otto in otext:gmatch("\\i?clip%([^%(%)]-%)") do
+      trnsfrm=trnsfrm..otto
+    end
+    for toot in otext:gmatch("\\t%([^%(%)]-#[^%)]-%$[^%)]-%)") do
+      trnsfrm=trnsfrm..toot
+    end
+    otext=otext:gsub("\\i?clip%([^%(%)]-%)","")
+    :gsub("\\t%([^%(%)]-#[^%)]-%$[^%)]-%)","")
+    otext = "\\N"..otext.."\\N"
+    ss_table = {}
+    for tgs, txs in otext:gmatch("({[^}]*})([^{]*)") do
+      table.insert(ss_table, { tag = tgs, text = txs })
+    end
+    local warp = nil
+    for qq = 1,#sub do
+      if sub[qq].class == "info" then
+        local qw = sub[qq]
+        if qw.key == "WrapStyle" then
+          warp = qw.value
+          break
+        end
+      end
+    end
+    if warp ~= nil and ss_table[1].tag:match("\\q") == nil then
+      ss_table[1].tag=ss_table[1].tag:gsub("{","{\\q"..warp)
+    end
+    for wq = 1,#ss_table do
+      if ss_table[wq].text:match("\\n") then
+        for wwq = wq,1,-1 do
+          if ss_table[wwq].tag:match("\\q") then
+            if ss_table[wwq].tag:match("\\q2") then
+              ss_table[wq].text=ss_table[wq].text:gsub("\\n","\\N\\Nth¡s ¡s soft not hard")
+            end
+            break
+          end
+        end
+      end
+    end
+    stext = ""
+    for ss = 1,#ss_table do
+      stext = stext .. ss_table[ss].tag .. ss_table[ss].text
+    end
+    stext = "\\N"..stext
+    ar_table = {}
+    for tg, tx in stext:gmatch("({[^}]*})([^{]*)") do
+      table.insert(ar_table, { tag = tg, text = tx })
+    end
+    repeat
+      local tagt = false
+      for l = 1,#ar_table do
+        if ar_table[l].tag:match("\\t%([^%(%)\\]-\\") then
+          tagt = true
+          ar_table[l].tag=ar_table[l].tag:gsub("(\\t%([^%(%)\\]-)\\","%1¡")
+        end
+      end
+    until not tagt
+    stags = {"\\fsize","\\fscx","\\fscy","\\fsp","\\1c","\\2c","\\3c","\\4c","\\1a","\\2a","\\3a","\\4a","\\bord","\\shad","\\bold","\\ita","\\u","\\str","\\frz","\\fn","\\fe","\\blur","\\be","\\frx","\\fry","\\fax","\\fay","\\xbord","\\xshad","\\ybord","\\yshad","\\pic","\\pbo","\\q"}
+    for ord = 1,#ar_table do
+      for ats = 1,#stags do
+        if ar_table[ord].tag:match(stags[ats]) then
+          local clean = {}
+          for dro in ar_table[ord].tag:gmatch(stags[ats]) do
+            table.insert(clean,  dro)
+          end
+          ar_table[ord].tag=ar_table[ord].tag:gsub(stags[ats].."[^\\}]+","", #clean - 1)
+        end
+      end
+    end
+    for bb = 1,#ar_table do
+      if ar_table[bb].tag:match("\\alpha") then
+        local cleana = {}
+        for droa in ar_table[bb].tag:gmatch("(\\alpha)") do
+          table.insert(cleana,  droa)
+        end
+        ar_table[bb].tag=ar_table[bb].tag:gsub("\\alpha[^\\}]+","", #cleana - 1)
+        local beforea = ar_table[bb].tag:match("(.+)\\alpha")
+        local aftera = ar_table[bb].tag:match("\\alpha[^\\}]+(.+)")
+        local alpha = ar_table[bb].tag:match("\\alpha[^\\}]+")
+        for cc = 1,4 do
+          beforea=beforea:gsub("\\"..cc.."a[^\\}]+","")
+          if aftera:match("\\"..cc.."a") == nil then
+            alpha=alpha:gsub("\\alpha([^\\}]+)","\\alpha%1\\"..cc.."a%1")
+          end
+        end
+        ar_table[bb].tag = beforea..alpha..aftera
+      end
+    end
+    for dd = 1,#ar_table do
+      ar_table[dd].tag=ar_table[dd].tag:gsub("\\alpha([^\\}]+)","")
+    end
+    local ff = nil
+    rtags = {"\\fsize","\\fscx","\\fscy","\\fsp","\\1c","\\2c","\\3c","\\4c","\\1a","\\2a","\\3a","\\4a","\\bord","\\shad","\\bold","\\ita","\\u","\\str","\\frz","\\fn","\\fe"}
+    rsty = {"fontsize","scale_x","scale_y","spacing","color1","color2","color3","color4","color1","color2","color3","color4","outline","shadow","bold","italic","underline","strikeout","angle","fontname","encoding"}
+    for ee = 1,#ar_table do
+      if ar_table[ee].tag:match("\\r") then
+        local cleanr = {}
+        for dror in ar_table[ee].tag:gmatch("(\\r)") do
+          table.insert(cleanr,  dror)
+        end
+        ar_table[ee].tag=ar_table[ee].tag:gsub("\\r[^\\}]+","", #cleanr -1)
+        ff = ar_table[ee].tag:match("\\r([^\\}]+)")
+        rtagsty = {}
+        for ir = 1,#sub do
+          if sub[ir].class == "style" then
+            local rst = sub[ir]
+            if ff == rst.name then
+              rstyref = rst
+              break
+            end
+          end
+        end
+        for hr = 1,#rsty do
+          rtagsty[hr] = rstyref[rsty[hr]]
+        end
+        for hh = 5,8 do
+          rtagsty[hh] = rtagsty[hh]:gsub("H%x%x","H")
+        end
+        for ii = 9,12 do
+          rtagsty[ii] = rtagsty[ii]:match("&H%x%x").."&"
+        end
+        local beforer = ar_table[ee].tag:match("(.+)\\r")
+        local afterr = ar_table[ee].tag:match("\\r[^\\}]+(.+)")
+        local rtag = ar_table[ee].tag:match("\\r[^\\}]+")
+        for jj = 1,#rtags do
+          beforer=beforer:gsub(rtags[jj].."[^\\}]+","")
+          if afterr:match(rtags[jj]) == nil then
+            local tag3 = rtagsty[jj]
+            if type(tag3) == "string" or type(tag3) == "number" then
+              rtag=rtag:gsub("(\\r[^\\}]+)","%1"..rtags[jj]..tag3)
+            else
+              if tag3 then
+                rtag=rtag:gsub("(\\r[^\\}]+)","%1"..rtags[jj].."1")
+              else
+                rtag=rtag:gsub("(\\r[^\\}]+)","%1"..rtags[jj].."0")
+              end
+            end
+          end
+        end
+        ar_table[ee].tag = beforer..rtag..afterr
+      end
+    end
+    for kk = 1,#ar_table do
+      ar_table[kk].tag=ar_table[kk].tag:gsub("\\r[^\\}]+","")
+    end
+    ttags = {"\\fsize","\\fsp","\\1c","\\2c","\\3c","\\4c","\\1a","\\2a","\\3a","\\4a","\\fscx","\\fscy","\\frz","\\bord","\\shad","\\fax","\\fay","\\fry","\\frx","\\blur","\\be","\\xbord","\\xshad","\\ybord","\\yshad"}
+    ttags2 = {"¡fsize","¡fsp","¡1c","¡2c","¡3c","¡4c","¡1a","¡2a","¡3a","¡4a","¡fscx","¡fscy","¡frz","¡bord","¡shad","¡fax","¡fay","¡fry","¡frx","¡blur","¡be","¡xbord","¡xshad","¡ybord","¡yshad"}
+    repeat
+      local cleant = false
+      for tcl = 1,#ar_table do
+        for tcle = 1,#ttags do
+          if ar_table[tcl].tag:match(ttags2[tcle]) then
+            local aftert = ar_table[tcl].tag:match(ttags2[tcle].."[^¡%)]+(.+)")
+            if aftert:match(ttags[tcle]) then
+              cleant = true
+              ar_table[tcl].tag=ar_table[tcl].tag:gsub(ttags2[tcle].."[^¡%)]+","",1)
+              ar_table[tcl].tag=ar_table[tcl].tag:gsub("\\t%([^¡%)]-%)","")
+            end
+          end
+        end
+      end
+    until not cleant
+    repeat
+      local tagt2 = false
+      for l = 1,#ar_table do
+        if ar_table[l].tag:match("\\t%([^%(%)¡]-¡") then
+          tagt2 = true
+          ar_table[l].tag=ar_table[l].tag:gsub("(\\t%([^%(%)¡]-)¡","%1\\")
+        end
+      end
+    until not tagt2
+    artext = ""
+    for ar = 1,#ar_table do
+      artext = artext .. ar_table[ar].tag .. ar_table[ar].text
+    end
+    artext = "\\N"..artext
+    t_table = {}
+    for t in artext:gmatch("(\\N.-)\\N") do
+      table.insert(t_table, t)
+    end
+    for aaat = 1,#t_table do
+      t_table[aaat]=t_table[aaat]:gsub("\\N","")
+    end
+    for bbbt = 1,#t_table do
+      t_table[bbbt] = (t_table[bbbt]:match("^{") == nil) and "{}" .. t_table[bbbt] or t_table[bbbt]
+    end
+    ttag = {}
+    tt_table = {}
+    for xt = 1,#t_table do
+      ttt_table = {}
+      for tgt, txt in t_table[xt]:gmatch("({[^}]*})([^{]*)") do
+        table.insert(ttt_table, { tag = tgt, text = txt })
+      end
+      tt_table[xt] = ttt_table
+      tag = {}
+      for tnt = 1,#tt_table[xt] do
+        ag = {}
+        if tt_table[xt][tnt].tag:match("\\t") then
+          for tt in tt_table[xt][tnt].tag:gmatch("(\\t%([^%(%)]-%))") do
+            table.insert(ag, tt)
+          end
+        else
+          ag[1] = ""
+        end
+        for ddt = 1,#ag do
+          ag[ddt]=ag[ddt]:gsub("\\alpha([^\\%)]+)","\\1a%1\\2%1\\3a%1\\4a%1")
+        end
+        for ttt = 1,#ag do
+          if tag[tnt] == nil then
+            tag[tnt] = ag[ttt]
+          else
+            tag[tnt] = tag[tnt]..ag[ttt]
+          end
+        end
+      end
+      ttag[xt] = tag
+    end
+    local tft = nil
+    repeat
+      local found = false
+      for yt = 1,#ttag do
+        for it = 1,#ttag[yt] do
+          if ttag[yt][it]:match("\\t%([^\\%(%)]-\\[^\\%(%)]+\\") then
+            found = true
+            ttag[yt][it]=ttag[yt][it]:gsub("\\t%(([^\\%(%)]-)\\([^\\%)]+)","\\t%(%1\\%2%)\\t%(%1")
+            ttag[yt][it]=ttag[yt][it]:gsub("\\t%([^\\%)]-%)","")
+          end
+        end
+      end
+    until not found
+    for tov = 1,#tt_table do
+      for lt = 1,#tt_table[tov] do
+        tt_table[tov][lt].tag=tt_table[tov][lt].tag:gsub("(\\t%([^%(%)]+%))","")
+      end
+    end
+    for mot = 1,#ttags do
+      poitt = {}
+      for got = 1,#ttag do
+        poit = {}
+        for tog = 1,#ttag[got] do
+          xot = 1
+          yot = 1
+          local found_ttag = false
+          for sot = tog,1,-1 do
+            if tt_table[got][sot].tag:match(ttags[mot]) then
+              yot = got
+              xot = sot
+              found_ttag = true
+              break
+            end
+          end
+          if not found_ttag then
+            for tos = got-1,1,-1 do
+              for fot = #tt_table[tos],1,-1 do
+                if tt_table[tos][fot].tag:match(ttags[mot]) then
+                  yot = tos
+                  xot = fot
+                  break
+                  break
+                end
+              end
+            end
+          end
+          poi = {}
+          if yot < got then
+            for aot = xot,#ttag[yot] do
+              for tesu in ttag[yot][aot]:gmatch("\\t%([^\\%(%)]-"..ttags[mot].."[^\\%(%)]+%)") do
+                table.insert(poi, tesu)
+              end
+            end
+            for sgot = yot+1,got-1 do
+              for stog = 1,#ttag[sgot] do
+                for tou in ttag[sgot][stog]:gmatch("\\t%([^\\%(%)]-"..ttags[mot].."[^\\%(%)]+%)") do
+                  table.insert(poi, tou)
+                end
+              end
+            end
+            for kot = 1,tog do
+              for stou in ttag[got][kot]:gmatch("\\t%([^\\%(%)]-"..ttags[mot].."[^\\%(%)]+%)") do
+                table.insert(poi, stou)
+              end
+            end
+          else
+            for toa = xot,tog do
+              for tous in ttag[got][toa]:gmatch("\\t%([^\\%(%)]-"..ttags[mot].."[^\\%(%)]+%)") do
+                table.insert(poi, tous)
+              end
+            end
+          end
+          poit[tog] = poi
+        end
+        poitt[got] = poit
+      end
+      for wot = 1,#poitt do
+        for tow = 1,#poitt[wot] do
+          ttag[wot][tow]=ttag[wot][tow]:gsub("\\t%([^\\%(%)]-"..ttags[mot].."[^\\%(%)]+%)","")
+          for owt = #poitt[wot][tow],1,-1 do
+            ttag[wot][tow] = poitt[wot][tow][owt]..ttag[wot][tow]
+          end
+        end
+      end
+    end
+    n_table = {}
+    for n in artext:gmatch("(\\N.-)\\N") do
+      table.insert(n_table, n)
+    end
+    for aaa = 1,#n_table do
+      n_table[aaa]=n_table[aaa]:gsub("\\N","")
+    end
+    for bbb = 1,#n_table do
+      n_table[bbb] = (n_table[bbb]:match("^{") == nil) and "{}" .. n_table[bbb] or n_table[bbb]
+    end
+    yy_table = {}
+    for y = 1,#n_table do
+      yyy_table = {}
+      for tg, tx in n_table[y]:gmatch("({[^}]*})([^{]*)") do
+        table.insert(yyy_table, { tag = tg, text = tx })
+      end
+      yy_table[y] = yyy_table
+    end
+    for ll = 1,#yy_table do
+      for lll = 1,#yy_table[ll] do
+        yy_table[ll][lll].tag=yy_table[ll][lll].tag:gsub("(\\t%([^%(%)]+%))","")
+      end
+    end
+    for vn = 1,#stags do
+      local cn = nil
+      for z = 1,#n_table do
+        for iin = z-1,1,-1 do
+          if yy_table[z][1].tag ~= nil and yy_table[z][1].tag:match(stags[vn]) then
+            break
+          else
+            for jn = #yy_table[iin],1,-1 do
+              if yy_table[iin][jn].tag ~= nil and yy_table[iin][jn].tag:match(stags[vn].."[^\\}]+") then
+                cn = yy_table[iin][jn].tag:match(stags[vn].."[^\\}]+")
+                yy_table[z][1].tag=yy_table[z][1].tag:gsub("{","{"..cn)
+                goto donec
+              end
+            end
+          end
+        end
+        ::donec::
+      end
+    end
+    for nnn = 1,#n_table do
+      n_table[nnn] = ""
+      for mm = 1,#yy_table[nnn] do
+        n_table[nnn] = n_table[nnn] .. yy_table[nnn][mm].tag .. yy_table[nnn][mm].text
+      end
+    end
+    alt = {}
+    tagii = {}
+    jj_table = {}
+    for x = 1,#n_table do
+      jjj_table = {}
+      for tg, tx in n_table[x]:gmatch("({[^}]*})([^{]*)") do
+        table.insert(jjj_table, { tag = tg, text = tx })
+      end
+      jj_table[x] = jjj_table
+      btags = {"\\an","\\alig","\\pos","\\move","\\org","\\fad(","\\fade"}
+      for ba = 1,#btags do
+        b_table = {}
+        for bp = 1,#jj_table[x] do
+          if jj_table[x][bp].tag:match(btags[ba]) then
+            b_table[bp] = jj_table[x][bp].tag:match(btags[ba].."[^\\}]+")
+            jj_table[x][bp].tag=jj_table[x][bp].tag:gsub(btags[ba].."[^\\}]+","")
+          else
+            b_table[bp] = ""
+          end
+        end
+        for pb = 1,#jj_table[x] do
+          jj_table[x][pb].tag=jj_table[x][pb].tag:gsub("{","{"..b_table[#jj_table[x]-pb+1])
+        end
+      end
+      sty = {"fontsize","scale_x","scale_y","spacing","color1","color2","color3","color4","color1","color2","color3","color4","outline","shadow","bold","italic","underline","strikeout","angle","fontname","encoding"}
+      tagsty = {}
+      for h = 1,#sty do
+        tagsty[h] = line.styleref[sty[h]]
+      end
+      for n = 5,8 do
+        tagsty[n]=tagsty[n]:gsub("H%x%x","H")
+      end
+      for m = 9,12 do
+        tagsty[m]=tagsty[m]:match("&H%x%x").."&"
+      end
+      for a = 22,27 do
+        tagsty[a] = 0
+      end
+      tagsty[28] = tagsty[13]
+      tagsty[29] = tagsty[14]
+      tagsty[30] = tagsty[13]
+      tagsty[31] = tagsty[14]
+      tagsty[32] = 0
+      tagsty[33] = 0
+      tagsty[34] = warp
+      for qo = x-1,1,-1 do
+        if jj_table[qo][1].text:match("th¡s ¡s soft not hard") then
+          alt[qo][#alt[qo]+1] = "{\\q2}"
+        end
+      end
+      for om = 1,#stags do
+        for op = x-1,1,-1 do
+          for po = 1,#alt[op] do
+            if alt[op][po]:match(stags[om]) then
+              tagsty[om] = alt[op][po]:match(stags[om].."([^\\}]+)")
+              goto dones
+            end
+          end
+        end
+        ::dones::
+      end
+      for oqo = x-1,1,-1 do
+        if jj_table[oqo][1].text:match("th¡s ¡s soft not hard") then
+          alt[oqo][#alt[oqo]] = nil
+        end
+      end
+      if jj_table[x][1].text:match("th¡s ¡s soft not hard") then
+        tagsty[34] = 2
+      end
+      local c = nil
+      for v = 1,#stags do
+        for i = #jj_table[x],1,-1 do
+          for j = i-1,1,-1 do
+            if jj_table[x][i].tag ~= nil and jj_table[x][i].tag:match(stags[v]) then
+              break
+            else
+              if jj_table[x][j].tag ~= nil and jj_table[x][j].tag:match(stags[v].."[^\\}]+") then
+                c = jj_table[x][j].tag:match(stags[v].."[^\\}]+")
+                jj_table[x][i].tag=jj_table[x][i].tag:gsub("{","{"..c)
+                break
+              end
+            end
+          end
+        end
+      end
+      for o = 1,#stags do
+        for u = 1,#jj_table[x] do
+          if jj_table[x][u].tag:match(stags[o]) == nil then
+            local tag = tagsty[o]
+            if type(tag) == "string" or type(tag) == "number" then
+              jj_table[x][u].tag=jj_table[x][u].tag:gsub("{","{"..stags[o]..tag)
+            else
+              if tag then
+                jj_table[x][u].tag=jj_table[x][u].tag:gsub("{","{"..stags[o].."1")
+              else
+                jj_table[x][u].tag=jj_table[x][u].tag:gsub("{","{"..stags[o].."0")
+              end
+            end
+          end
+        end
+      end
+      for oo = 1,#stags do
+        for uu = #jj_table[x],1,-1 do
+          if jj_table[x][uu].tag:match(stags[oo]) then
+            for ww = uu+1,#jj_table[x] do
+              if jj_table[x][ww].tag:match(stags[oo]) then
+                if jj_table[x][ww].tag:match(stags[oo].."[^\\}]+") == jj_table[x][uu].tag:match(stags[oo].."[^\\}]+") then
+                  jj_table[x][uu].tag=jj_table[x][uu].tag:gsub(stags[oo].."[^\\}]+","")
+                end
+                break
+              end
+            end
+          end
+        end
+      end
+      tsty = {"fontsize","spacing","color1","color2","color3","color4","color1","color2","color3","color4","scale_x","scale_y","angle","outline","shadow"}
+      tagtsty = {}
+      for ht = 1,#tsty do
+        tagtsty[ht] = line.styleref[tsty[ht]]
+      end
+      for nt = 3,6 do
+        tagtsty[nt]=tagtsty[nt]:gsub("H%x%x","H")
+      end
+      for mt = 7,10 do
+        tagtsty[mt]=tagtsty[mt]:match("&H%x%x").."&"
+      end
+      for tat = 16,21 do
+        tagtsty[tat] = 0
+      end
+      tagtsty[22] = tagtsty[14]
+      tagtsty[23] = tagtsty[15]
+      tagtsty[24] = tagtsty[14]
+      tagtsty[25] = tagtsty[15]
+      for omt = 1,#ttags do
+        for opt = x-1,1,-1 do
+          for pot = 1,#alt[opt] do
+            if alt[opt][pot]:match(ttags[omt]) then
+              tagtsty[omt] = alt[opt][pot]:match(ttags[omt].."([^\\}]+)")
+              goto donet
+            end
+          end
+        end
+        ::donet::
+      end
+      for at = 1,#ttags do
+        for ta = 1,#jj_table[x] do
+          if ttag[x][ta]:match(ttags[at]) then
+            jjj = ta-1
+            if jjj > 0 then
+              for jjjj = jjj+1,#jj_table[x] do
+                if jj_table[x][jjj].tag:match(ttags[at]) then
+                  break
+                else
+                  if jj_table[x][jjjj].tag:match(ttags[at]) then
+                    tar = jj_table[x][jjjj].tag:match(ttags[at].."[^\\}]+")
+                    jj_table[x][jjj].tag=jj_table[x][jjj].tag:gsub("{","{"..tar)
+                  end
+                end
+              end
+              if jj_table[x][jjj].tag:match(ttags[at]) == nil then
+                jj_table[x][jjj].tag=jj_table[x][jjj].tag:gsub("{","{"..ttags[at]..tagtsty[at])
+              end
+            end
+          end
+        end
+      end
+      for tot = 1,#jj_table[x] do
+        jj_table[x][tot].tag=jj_table[x][tot].tag:gsub("{","{"..ttag[x][tot])
+      end
+      local ct = 0
+      local ctt = -1
+      local rar = nil
+      for vt = 1,#ttags do
+        for it = #jj_table[x],1,-1 do
+          if jj_table[x][it].tag:match(ttags[vt]) == nil then
+            for jt = it-1,1,-1 do
+              if jj_table[x][jt].tag ~= nil and jj_table[x][jt].tag:match(ttags[vt]) then
+                ct = jt
+                break
+              end
+            end
+            for jtt = it-1,1,-1 do
+              if jj_table[x][jtt].tag ~= nil and jj_table[x][jtt].tag:match("\\t%([^\\%(%)]-"..ttags[vt]) then
+                ctt = jtt
+                break
+              end
+            end
+            if ct <= ctt then
+              if jj_table[x][ctt].tag:match("\\t%([^\\%(%)]-"..ttags[vt]) ~= nil then
+                for uou = 1,#jj_table[x][ctt].tag:match("\\t%([^\\%(%)]-"..ttags[vt]) do
+                  rar = jj_table[x][ctt].tag:match("\\t%([^\\%(%)]-"..ttags[vt].."[^\\%(%)]+%)")
+                  if rar ~= nil then
+                    jj_table[x][it].tag=jj_table[x][it].tag:gsub("{","{"..rar)
+                    jj_table[x][ctt].tag=jj_table[x][ctt].tag:gsub(rar,"")
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+      tag2 = {}
+      for tnts = 1,#jj_table[x] do
+        ag2 = {}
+        if jj_table[x][tnts].tag:match("\\t") then
+          for tts in jj_table[x][tnts].tag:gmatch("(\\t%([^%(%)]-%))") do
+            table.insert(ag2, tts)
+          end
+        else
+          ag2[1] = ""
+        end
+        local lo = nil
+        for lol = 1,#ag2 do
+          if ag2[lol] ~= "" then
+            for lool = lol+1,#ag2 do
+              if ag2[lool] ~= "" and ag2[lol]:match("\\t%(([^\\%(%)]*)") == ag2[lool]:match("\\t%(([^\\%(%)]*)") then
+                lo = ag2[lool]:match("\\t%([^\\%(%)]-(\\[^%(%)]+)%)")
+                ag2[lol]=ag2[lol]:gsub("%)",lo.."%)")
+                ag2[lool] = ""
+              end
+            end
+          end
+        end
+        repeat
+          local foundalp = false
+          for aat = 1,#ag2 do
+            if ag2[aat]:match("\\1a") then
+              if ag2[aat]:match("\\2a") then
+                if ag2[aat]:match("\\3a") then
+                  if ag2[aat]:match("\\4a") then
+                    if ag2[aat]:match("\\1a([^\\%)]+)") == ag2[aat]:match("\\2a([^\\%)]+)") then
+                      if ag2[aat]:match("\\2a([^\\%)]+)") == ag2[aat]:match("\\3a([^\\%)]+)") then
+                        if ag2[aat]:match("\\3a([^\\%)]+)") == ag2[aat]:match("\\4a([^\\%)]+)") then
+                          foundalp = true
+                          ag2[aat]=ag2[aat]:gsub("\\2a[^\\%)]+","",1)
+                          ag2[aat]=ag2[aat]:gsub("\\3a[^\\%)]+","",1)
+                          ag2[aat]=ag2[aat]:gsub("\\4a[^\\%)]+","",1)
+                          ag2[aat]=ag2[aat]:gsub("\\1a([^\\%)]+)","\\alpha%1",1)
+                        end
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
+        until not foundalp
+        for ttts = 1,#ag2 do
+          if tag2[tnts] == nil then
+            tag2[tnts] = ag2[ttts]
+          else
+            tag2[tnts] = tag2[tnts]..ag2[ttts]
+          end
+        end
+      end
+      for ollo = 1,#jj_table[x] do
+        jj_table[x][ollo].tag=jj_table[x][ollo].tag:gsub("(\\t%([^%(%)]+%))","")
+      end
+      for b = 1,#stags do
+        for q = #jj_table[x],1,-1 do
+          if jj_table[x][q].tag:match(stags[b]) then
+            local found_next_tag = false
+            for w = q+1,#jj_table[x] do
+              if jj_table[x][w].tag ~= nil and jj_table[x][w].tag:match(stags[b]) or tag2[w]:match(stags[b]) then
+                found_next_tag = true
+                break
+              end
+            end
+            if not found_next_tag then
+              local tag2 = tagsty[b]
+              if type(tag2) == "string" or type(tag2) == "number" then
+                tag2 = tostring(tag2)
+                if jj_table[x][q].tag:match(stags[b].."[^\\}]+") ~= stags[b]..tag2 then
+                  break
+                else
+                  jj_table[x][q].tag=jj_table[x][q].tag:gsub(stags[b].."[^\\}]+","")
+                end
+              else
+                if tag2 then
+                  if jj_table[x][q].tag:match(stags[b].."[^\\}]+") ~= stags[b].."1" then
+                    break
+                  else
+                    jj_table[x][q].tag=jj_table[x][q].tag:gsub(stags[b].."[^\\}]+","")
+                  end
+                else
+                  if jj_table[x][q].tag:match(stags[b].."[^\\}]+") ~= stags[b].."0" then
+                    break
+                  else
+                    jj_table[x][q].tag=jj_table[x][q].tag:gsub(stags[b].."[^\\}]+","")
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+      for tr = 1,#ttags do
+        if jj_table[x][#jj_table[x]].tag:match(ttags[tr]) == nil then
+          tba = 0
+          abt = 0
+          for rt = x-1,1,-1 do
+            for tup = 1,#tagii[rt] do
+              if tagii[rt][tup]:match(ttags[tr]) then
+                tba = rt
+                abt = tup
+                goto donet2
+              end
+            end
+          end
+          ::donet2::
+          uop = 0
+          pou = -1
+          for rtp = x-1,1,-1 do
+            for tupp = 1,#tagii[rtp] do
+              if alt[rtp][tupp]:match(ttags[tr]) then
+                uop = rtp
+                pou = tupp
+                goto donet3
+              end
+            end
+          end
+          ::donet3::
+          if uop <= tba then
+            if abt <= pou then
+              jj_table[x][#jj_table[x]].tag=jj_table[x][#jj_table[x]].tag:gsub("{","{"..ttags[tr]..tagtsty[tr])
+            end
+          end
+        end
+      end
+      alt2 = {}
+      for vgd = 1,#jj_table[x] do
+       alt2[vgd] = jj_table[x][vgd].tag
+      end
+      alt[x] = alt2
+      for ry = 1,#jj_table[x] do
+        local jtagr = {}
+        local foundr3 = false
+        for ryo = 1,#rtags do
+          local foundr1 = false
+          for yr = ry,#jj_table[x] do
+            if jj_table[x][yr].tag:match(rtags[ryo]) then
+              foundr1 = true
+              jtagr[ryo] = jj_table[x][yr].tag:match(rtags[ryo].."([^\\}]+)")
+              break
+            end
+          end
+          if foundr1 then
+            foundr3 = true
+          else
+            jtagr[ryo] = tagsty[ryo]
+          end
+        end
+        if foundr3 then
+          for touy = 1,#jtagr do
+            if type(jtagr[touy]) == "string" or type(jtagr[touy]) == "number" then
+              jtagr[touy] = tostring(jtagr[touy])
+            else
+              if jtagr[touy] then
+                jtagr[touy] = "1"
+              else
+                jtagr[touy] = "0"
+              end
+            end
+          end
+          local rtagr = nil
+          for ryu = 1,#sub do
+            local jtagr2 = {}
+            if sub[ryu].class == "style" then
+              ror = sub[ryu]
+              for oro = 1,#rsty do
+                jtagr2[oro] = ror[rsty[oro]]
+              end
+              for hhr = 5,8 do
+                jtagr2[hhr] = jtagr2[hhr]:gsub("H%x%x","H")
+              end
+              for iir = 9,12 do
+                jtagr2[iir] = jtagr2[iir]:match("&H%x%x").."&"
+              end
+              for touyy = 1,#jtagr2 do
+                if type(jtagr2[touyy]) == "string" or type(jtagr2[touyy]) == "number" then
+                  jtagr2[touyy] = tostring(jtagr2[touyy])
+                else
+                  if jtagr2[touyy] then
+                    jtagr2[touyy] = "1"
+                  else
+                    jtagr2[touyy] = "0"
+                  end
+                end
+              end
+              local foundr2 = false
+              for iri = 1,#rsty do
+                if jtagr[iri] ~= jtagr2[iri] then
+                  foundr2 = true
+                end
+              end
+              if not foundr2 then
+                rtagr = ror.name
+                break
+              end
+            end
+          end
+          if rtagr ~= nil then
+            for oyr = 1,#rtags do
+              jj_table[x][ry].tag=jj_table[x][ry].tag:gsub(rtags[oyr].."[^\\}]+","")
+            end
+            jj_table[x][ry].tag=jj_table[x][ry].tag:gsub("{","{\\r"..rtagr)
+          end
+        end
+      end
+      for aa = 1,#jj_table[x] do
+        if jj_table[x][aa].tag:match("\\1a") then
+          if jj_table[x][aa].tag:match("\\2a") then
+            if jj_table[x][aa].tag:match("\\3a") then
+              if jj_table[x][aa].tag:match("\\4a") then
+                if jj_table[x][aa].tag:match("\\1a([^\\}]+)") == jj_table[x][aa].tag:match("\\2a([^\\}]+)") then
+                  if jj_table[x][aa].tag:match("\\2a([^\\}]+)") == jj_table[x][aa].tag:match("\\3a([^\\}]+)") then
+                    if jj_table[x][aa].tag:match("\\3a([^\\}]+)") == jj_table[x][aa].tag:match("\\4a([^\\}]+)") then
+                      jj_table[x][aa].tag=jj_table[x][aa].tag:gsub("\\2a[^\\}]+","")
+                      jj_table[x][aa].tag=jj_table[x][aa].tag:gsub("\\3a[^\\}]+","")
+                      jj_table[x][aa].tag=jj_table[x][aa].tag:gsub("\\4a[^\\}]+","")
+                      jj_table[x][aa].tag=jj_table[x][aa].tag:gsub("\\1a([^\\}]+)","\\alpha%1")
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+      for oto = 1,#jj_table[x] do
+        jj_table[x][oto].tag=jj_table[x][oto].tag:gsub("}",tag2[oto].."}")
+      end
+      tagii[x] = tag2
+      if x == 1 then
+        jj_table[x][#jj_table[x]].tag=jj_table[x][#jj_table[x]].tag:gsub("{","{"..trnsfrm)
+      end
+      n_table[x] = ""
+      for tn = #jj_table[x],1,-1 do
+        n_table[x] = n_table[x] .. jj_table[x][tn].tag .. jj_table[x][tn].text
+      end
+      n_table[x]=n_table[x]:gsub("}([^{]+)","}££££££££££₩₩₩₩₩₩₩₩₩₩%1€€€€€€€€€€¥¥¥¥¥¥¥¥¥¥")
+      :gsub("([^{}]+)€€€€€€€€€€¥¥¥¥¥¥¥¥¥¥{}££££££££££₩₩₩₩₩₩₩₩₩₩([^{}]+)","%1%2")
+    end
+    for nn = 2,#n_table do
+      if n_table[nn]:match("th¡s ¡s soft not hard") then
+        n_table[nn]=n_table[nn]:gsub("th¡s ¡s soft not hard","")
+        n_table[nn] = "\\n"..n_table[nn]
+        local found_q = false
+        for nnq = nn-1,1,-1 do
+          for qnn = 1,#jj_table[nnq] do
+            if jj_table[nnq][qnn].tag:match("\\q") then
+              found_q = true
+              if jj_table[nnq][qnn].tag:match("\\q(%d)") ~= "2" then
+                n_table[nn] = "{\\q2}"..n_table[nn]
+              end
+              goto doneq
+            end
+          end
+        end
+        ::doneq::
+        if not found_q then
+          if warp ~= "2" then
+            n_table[nn] = "{\\q2}"..n_table[nn]
+          end
+        end
+      else
+        n_table[nn] = "\\N"..n_table[nn]
+      end
+    end
+    pt = ""
+    for tt = 1,#n_table do
+      pt = pt .. n_table[tt]
+    end
+    pt=pt:gsub("\\1c&","\\c&")
+    :gsub("\\frz","\\fr")
+    :gsub("\\str","\\s")
+    :gsub("\\ita","\\i")
+    :gsub("\\fsize","\\fs")
+    :gsub("\\bold","\\b")
+    :gsub("\\alig","\\a")
+    :gsub("\\pic","\\p")
+    :gsub("\\r"..style1.."([\\}])","\\r%1")
+    :gsub("(\\t%([^%(%)]-)#([^%)]-)%$([^%)]-%))","%1%(%2%)%3")
+    :gsub("{}","")
+    :gsub("《《([^\\{}]-)》》","{%1}")
+    line.text=pt
+    sub[li]=line
+  end
+  return sel
+end
+
 ----- Register Scripts -----
 aegisub.register_macro(paknevis_script_name, 'Fix your shity writing habbits! (Unretarded Lines Only)', PakNevis)
 aegisub.register_macro(extend_move_script_name, 'Extend \\move based on line\'s time.', ExtendMove)
 aegisub.register_macro(unretard_script_name, 'Unretard your retarted Persian typing! (Retarded Lines Only)', Unretard)
 aegisub.register_macro(rtl_script_name, 'Fix RTL languages displaying issues. (Unretarded Lines Only)', Rtl)
+aegisub.register_macro(rtlwo_reverse_script_name, 'Fixes RTL languages displaying issues without reversing.', rtlwo_reverse)
 aegisub.register_macro(unrtl_script_name, 'Undo RTL function effects.', Unrtl)
 aegisub.register_macro(rtleditor_script_name, 'An editor for easy editing of RTL language lines.', RtlEditor)
 aegisub.register_macro(split_at_tags_script_name, 'A splitter (at tags) for RTL language lines.', SplitAtTags)
