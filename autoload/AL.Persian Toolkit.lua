@@ -37,7 +37,7 @@ local split_at_spaces_script_name = 'AL Persian Toolkit/Split/Split at Spaces'
 local reverse_split_at_tags_script_name = 'AL Persian Toolkit/Split/Reverse + Split (at Tags)'
 local reverse_at_tags_script_name = 'AL Persian Toolkit/Split/Reverse at Tags'
 
------ Global Variables ----
+----- Global Variables -----
 LRM = utf8.char(0x200E)
 RLE = utf8.char(0x202B)
 RLM = utf8.char(0x200F)
@@ -45,21 +45,11 @@ PDF = utf8.char(0x202C)
 subtitles = nil
 
 ----- Global Functions -----
-local function removeRleChars(text)
-    text = re.sub(text, RLE, "")
-    return text
-end
-
-local function unrtl(text)
-    text, _ = re.sub(text, "^((?:\\{.*?\\})*)" .. RLE, "\\1")
-    text, _ = re.sub(text, "(\\\\[Nn])((?:\\{.*?\\})*)" .. RLE, "\\1\\2")
-    return text
-end
-
-local function rtl(text)
-    text = unrtl(text)
-    text, _ = re.sub(text, "^((?:\\{.*?\\})*)", "\\1" .. RLE)
-    text, _ = re.sub(text, "(\\\\[Nn])((?:\\{.*?\\})*)", "\\1\\2" .. RLE)
+function removeRTLChars(text)
+    text = utf8.gsub(text, LRM, "")
+    text = utf8.gsub(text, RLE, "")
+    text = utf8.gsub(text, RLM, "")
+    text = utf8.gsub(text, PDF, "")
     return text
 end
 
@@ -115,25 +105,6 @@ local function difference(a, b)
         ret[k] = v
     end
     return ret
-end
-
--- expand to table of tag-text
-local function expand(text)
-    local result = {}
-
-    local firstPart = re.match(text, "^([^{].*?)(?:\\{|$)")
-    if firstPart ~= nil then
-        table.insert(result, { tag = "", text = firstPart[2].str })
-    end
-
-    for f in re.gfind(text, "(\\{.*?\\})([^{]*)") do
-        local m = re.match(f, "(\\{.*?\\})([^{]*)")
-        if m[2] == nil then m[2] = { str = "" } end
-        if m[3] == nil then m[3] = { str = "" } end
-        table.insert(result, { tag = m[2].str, text = m[3].str })
-    end
-
-    return result
 end
 
 -- source: https://github.com/unanimated/luaegisub/blob/master/ua.Relocator.lua#L2555
@@ -286,102 +257,1327 @@ function Unretard(subtitles, selected_lines, active_line)
 end
 
 ----- RTL -----
-function Rtl(sub, sel, act)
-    fixinline(sub, sel, act)
-    for z, i in ipairs(sel) do
-        local l = sub[i]
-        text = l.text
+local RTl = {}
 
-        text = text:gsub("££££££££££",LRM)
-        :gsub("₩₩₩₩₩₩₩₩₩₩",RLE)
-        :gsub("€€€€€€€€€€",RLM)
-        :gsub("¥¥¥¥¥¥¥¥¥¥",PDF)
+RTl.all_override_tags = {
+    "\\fsize", "\\fscx", "\\fscy", "\\fsp", "\\1c", "\\2c", "\\3c", "\\4c",
+    "\\1a", "\\2a", "\\3a", "\\4a", "\\bord", "\\shad", "\\bold", "\\ita",
+    "\\u", "\\str", "\\frz", "\\fn", "\\fe", "\\blur", "\\be", "\\frx",
+    "\\fry", "\\fax", "\\fay", "\\xbord", "\\xshad", "\\ybord", "\\yshad",
+    "\\pic","\\pbo","\\q"
+}
+RTl.style_tags = {
+    "\\fsize", "\\fscx", "\\fscy", "\\fsp", "\\1c", "\\2c", "\\3c", "\\4c",
+    "\\1a", "\\2a", "\\3a", "\\4a", "\\bord", "\\shad", "\\bold", "\\ita",
+    "\\u", "\\str", "\\frz", "\\fn", "\\fe"
+}
+RTl.transform_tags = {
+    "\\fsize", "\\fsp", "\\1c", "\\2c", "\\3c", "\\4c", "\\1a", "\\2a", "\\3a", "\\4a",
+    "\\fscx", "\\fscy", "\\frz", "\\bord", "\\shad", "\\fax", "\\fay", "\\fry", "\\frx",
+    "\\blur", "\\be", "\\xbord", "\\xshad", "\\ybord", "\\yshad"
+}
+RTl.changed_transform_tags = {
+    "¡fsize", "¡fsp", "¡1c", "¡2c", "¡3c", "¡4c", "¡1a", "¡2a", "¡3a", "¡4a",
+    "¡fscx", "¡fscy", "¡frz", "¡bord", "¡shad", "¡fax", "¡fay", "¡fry", "¡frx",
+    "¡blur", "¡be", "¡xbord", "¡xshad", "¡ybord", "¡yshad"
+}
+RTl.non_override_tags = {
+    "\\an", "\\alig", "\\pos", "\\move", "\\org", "\\fad%(", "\\fade"
+}
+RTl.style_names = {
+    "fontsize", "scale_x", "scale_y", "spacing", "color1", "color2", "color3", "color4",
+    "color1", "color2", "color3", "color4", "outline", "shadow", "bold", "italic",
+    "underline", "strikeout", "angle", "fontname", "encoding"
+}
+RTl.transform_style_names = {
+    "fontsize", "spacing", "color1", "color2", "color3", "color4", "color1", "color2",
+    "color3", "color4", "scale_x", "scale_y", "angle", "outline", "shadow"
+}
 
-        l.text = text
-        sub[i] = l
+function get_initial_values(styleref, wrapstyle)
+    local result = {}
+
+    local all_initial_values = {}
+    for i = 1, #RTl.style_names do
+        all_initial_values[i] = styleref[RTl.style_names[i]]
     end
-    aegisub.set_undo_point(rtl_script_name)
+    for i = 5, 8 do
+        all_initial_values[i] = utf8.gsub(all_initial_values[i], "H%x%x", "H")
+    end
+    for i = 9, 12 do
+        all_initial_values[i] = utf8.match(all_initial_values[i], "&H%x%x") .. "&"
+    end
+    for i = 22, 27 do
+        all_initial_values[i] = 0
+    end
+    all_initial_values[28] = all_initial_values[13]
+    all_initial_values[29] = all_initial_values[14]
+    all_initial_values[30] = all_initial_values[13]
+    all_initial_values[31] = all_initial_values[14]
+    all_initial_values[32] = 0
+    all_initial_values[33] = 0
+    all_initial_values[34] = wrapstyle
+
+    local transform_initial_values = {}
+    for i = 1, #RTl.transform_style_names do
+        transform_initial_values[i] = styleref[RTl.transform_style_names[i]]
+    end
+    for i = 3,6 do
+        transform_initial_values[i] = utf8.gsub(transform_initial_values[i], "H%x%x", "H")
+    end
+    for i = 7,10 do
+        transform_initial_values[i] = utf8.match(transform_initial_values[i], "&H%x%x") .. "&"
+    end
+    for i = 16,21 do
+        transform_initial_values[i] = 0
+    end
+    transform_initial_values[22] = transform_initial_values[14]
+    transform_initial_values[23] = transform_initial_values[15]
+    transform_initial_values[24] = transform_initial_values[14]
+    transform_initial_values[25] = transform_initial_values[15]
+
+    result[1] = all_initial_values
+    result[2] = transform_initial_values
+    return result
 end
 
------ Un-RTL -----
-function Unrtl(sub, sel, act)
-    for z, i in ipairs(sel) do
-        local line = sub[i]
-        text = line.text
+function get_warpstyle(subtitles)
+    local result = nil
 
-        text=text:gsub("{([^\\{}]-)}","《《%1》》")
-        if text:match("}[^{}]+{") then
-            fixinline(sub, {i}, act)
+    for q = 1, #subtitles do
+        if subtitles[q].class == "info" then
+            local infoclass = subtitles[q]
+            if infoclass.key == "WrapStyle" then
+                result = infoclass.value
+                break
+            end
         end
     end
-    for zz, ii in ipairs(sel) do
-        local line = sub[ii]
-        text = line.text
 
-        text = text:gsub("££££££££££","")
-        :gsub("₩₩₩₩₩₩₩₩₩₩","")
-        :gsub("€€€€€€€€€€","")
-        :gsub("¥¥¥¥¥¥¥¥¥¥","")
-        :gsub(LRM, "")
-        :gsub(RLE , "")
-        :gsub(RLM, "")
-        :gsub(PDF, "")
-
-        line.text = text
-        sub[ii] = line
-    end
-    aegisub.set_undo_point(unrtl_script_name)
+    return result
 end
 
------ RTL (w/o Reverse) -----
-function rtlwo_reverse(sub, sel, act)
-    for z, i in ipairs(sel) do
-        local line = sub[i]
-        text1 = line.text
-        text1 = text1:gsub("{([^\\{}]-)}","《《%1》》")
-        text = (text1:match("^{") == nil) and "{}" .. text1 or text1
+function segmentation_based_on_tags(text)
+    local result = {}
 
-        text = text:gsub("}([^{]+)", "}"..LRM..RLE.."%1"..RLM..PDF)
-        :gsub("\\N", RLM..PDF.."\\N"..LRM..RLE)
-        tablo = {}
-        for tg, tx in text:gmatch("({[^}]*})([^{]*)") do
-            table.insert(tablo, { tag = tg, text = tx})
+    for tags, texts in utf8.gmatch(text, "({[^}]*})([^{]*)") do
+        table.insert(result, { tag = tags, text = texts })
+    end
+
+    return result
+end
+
+function segmentation_based_on_breaks(text)
+    local result = {}
+
+    for N in text:gmatch("\\N(.-)\\N") do
+      table.insert(result, N)
+    end
+
+    return result
+end
+
+function convert_the_tags_to_a_usable_form(text, style)
+    text = utf8.gsub(text, "\\c&", "\\1c&")
+    text = utf8.gsub(text, "\\fr([^xyz])", "\\frz%1")
+    if style ~= nil then
+        text = utf8.gsub(text, "\\r([\\}])", "\\r" .. style .. "%1")
+    end
+    text = utf8.gsub(text, "\\s([01])", "\\str%1")
+    text = utf8.gsub(text, "\\i([01])", "\\ita%1")
+    text = utf8.gsub(text, "\\fs([%d%.])", "\\fsize%1")
+    text = utf8.gsub(text, "\\b(%d)", "\\bold%1")
+    text = utf8.gsub(text, "\\a(%d)", "\\alig%1")
+    text = utf8.gsub(text, "\\p(%d)", "\\pic%1")
+
+    return text
+end
+
+function return_the_tags_to_their_correct_form(text, style)
+    text = utf8.gsub(text, "\\1c&", "\\c&")
+    text = utf8.gsub(text, "\\frz", "\\fr")
+    text = utf8.gsub(text, "\\str", "\\s")
+    text = utf8.gsub(text, "\\ita", "\\i")
+    text = utf8.gsub(text, "\\fsize", "\\fs")
+    text = utf8.gsub(text, "\\bold", "\\b")
+    text = utf8.gsub(text, "\\alig", "\\a")
+    text = utf8.gsub(text, "\\pic", "\\p")
+    if style ~= nil then
+        text = utf8.gsub(text, "\\r" .. style .. "([\\}])", "\\r%1")
+    end
+
+    return text
+end
+
+function replace_r_with_tags(text, style)
+    local result = ""
+
+    text = (utf8.match(text, "^{") == nil) and "{}" .. text or text
+
+    text = convert_the_tags_to_a_usable_form(text, style)
+
+    local tag_text_table = segmentation_based_on_tags(text)
+
+    tag_text_table = change_tags_inside_t(tag_text_table)
+
+    tag_text_table = remove_effectless_tags(tag_text_table)
+
+    tag_text_table = handle_r(tag_text_table)
+
+    tag_text_table = retutn_tags_inside_t_to_notmal(tag_text_table)
+
+
+    for i = 1, #tag_text_table do
+        result = result .. tag_text_table[i].tag .. tag_text_table[i].text
+    end
+
+    result = return_the_tags_to_their_correct_form(result, style)
+    
+    return result
+end
+
+function remove_t_tags(breaks_tag_text_table)
+    for x1 = 1, #breaks_tag_text_table do
+        for x2 = 1, #breaks_tag_text_table[x1] do
+            breaks_tag_text_table[x1][x2].tag = utf8.gsub(breaks_tag_text_table[x1][x2].tag, "(\\t%([^%(%)]+%))", "")
         end
-        local warp = nil
-        for q = 1,#sub do
-            if sub[q].class == "info" then
-                local qq = sub[q]
-                if qq.key == "WrapStyle" then
-                    warp = qq.value
+    end
+
+    return breaks_tag_text_table
+end
+
+function prepare_first_step(line, wrapstyle)
+    local result = ""
+
+    local tag_text_table = segmentation_based_on_tags(line.text)
+
+    tag_text_table = change_tags_inside_t(tag_text_table)
+
+    tag_text_table = remove_effectless_tags(tag_text_table)
+
+    tag_text_table = handle_soft_line_breaks(tag_text_table, wrapstyle)
+
+    tag_text_table = handle_alpha(tag_text_table)
+
+    tag_text_table = handle_r(tag_text_table)
+
+    tag_text_table = remove_effectless_tags_inside_t(tag_text_table)
+
+    tag_text_table = retutn_tags_inside_t_to_notmal(tag_text_table)
+
+    for i = 1, #tag_text_table do
+        result = result .. tag_text_table[i].tag .. tag_text_table[i].text
+    end
+    result = "\\N" .. result
+
+    return result
+end
+
+function change_tags_inside_t(tag_text_table)
+    repeat
+        local there_is_backslash_inside_t = false
+        for i = 1, #tag_text_table do
+            if utf8.match(tag_text_table[i].tag, "\\t%([^%(%)\\]-\\") then
+                there_is_backslash_inside_t = true
+                tag_text_table[i].tag = utf8.gsub(tag_text_table[i].tag, "(\\t%([^%(%)\\]-)\\", "%1¡")
+            end
+        end
+    until not there_is_backslash_inside_t
+
+    return tag_text_table
+end
+
+function remove_effectless_tags(tag_text_table)
+    for i = 1, #tag_text_table do
+        for x = 1, #RTl.all_override_tags do
+            if utf8.match(tag_text_table[i].tag, RTl.all_override_tags[x]) then
+                local tags_of_the_same_type = {}
+                for tags_in_order in utf8.gmatch(tag_text_table[i].tag, RTl.all_override_tags[x]) do
+                    table.insert(tags_of_the_same_type, tags_in_order)
+                end
+                tag_text_table[i].tag = utf8.gsub(tag_text_table[i].tag, RTl.all_override_tags[x] .. "[^\\}]+", "", #tags_of_the_same_type - 1)
+            end
+        end
+    end
+
+    return tag_text_table
+end
+
+function handle_soft_line_breaks(tag_text_table, wrapstyle)
+    if wrapstyle ~= nil and utf8.match(tag_text_table[1].tag, "\\q") == nil then
+        tag_text_table[1].tag= utf8.gsub(tag_text_table[1].tag, "{", "{\\q" .. wrapstyle)
+    end
+
+    for n = 1, #tag_text_table do
+        if utf8.match(tag_text_table[n].text, "\\n") then
+            for n2 = n, 1, -1 do
+                if utf8.match(tag_text_table[n2].tag, "\\q") then
+                    if utf8.match(tag_text_table[n2].tag, "\\q2") then
+                        tag_text_table[n].text = utf8.gsub(tag_text_table[n].text, "\\n", "\\N\\Nth¡s ¡s soft not hard")
+                    end
                     break
                 end
             end
         end
-        if warp ~= nil and tablo[1].tag:match("\\q") == nil then
-            tablo[1].tag=tablo[1].tag:gsub("{","{\\q"..warp)
+    end
+
+    tag_text_table[1].tag = utf8.gsub(tag_text_table[1].tag, "{\\q" .. wrapstyle, "{")
+
+    return tag_text_table
+end
+
+function handle_alpha(tag_text_table)
+    for i = 1, #tag_text_table do
+        if utf8.match(tag_text_table[i].tag, "\\alpha") then
+            local alpha_tags = {}
+            for alpha_tags_in_order in utf8.gmatch(tag_text_table[i].tag, "(\\alpha)") do
+                table.insert(alpha_tags, alpha_tags_in_order)
+            end
+            tag_text_table[i].tag = utf8.gsub(tag_text_table[i].tag, "\\alpha[^\\}]+", "", #alpha_tags - 1)
+            local before_alpha = utf8.match(tag_text_table[i].tag, "(.+)\\alpha")
+            local after_alpha = utf8.match(tag_text_table[i].tag, "\\alpha[^\\}]+(.+)")
+            local alpha = utf8.match(tag_text_table[i].tag, "\\alpha[^\\}]+")
+            for a = 1,4 do
+              before_alpha = utf8.gsub(before_alpha, "\\" .. a .. "a[^\\}]+", "")
+                if utf8.match(after_alpha, "\\" .. a .. "a") == nil then
+                    alpha = utf8.gsub(alpha, "\\alpha([^\\}]+)", "\\alpha%1\\" .. a .. "a%1")
+                end
+            end
+            tag_text_table[i].tag = before_alpha .. alpha .. after_alpha
+            tag_text_table[i].tag = utf8.gsub(tag_text_table[i].tag, "\\alpha([^\\}]+)", "")
         end
-        for wq = 1,#tablo do
-            if tablo[wq].text:match("\\n") then
-                for wwq = wq,1,-1 do
-                    if tablo[wwq].tag:match("\\q") then
-                        if tablo[wwq].tag:match("\\q2") then
-                            tablo[wq].text=tablo[wq].text:gsub("\\n",RLM..PDF.."\\n"..LRM..RLE)
+    end
+
+    return tag_text_table
+end
+
+function handle_r(tag_text_table)
+    for i1 = 1, #tag_text_table do
+        if utf8.match(tag_text_table[i1].tag, "\\r") then
+            local r_tags = {}
+            for r_tags_in_order in utf8.gmatch(tag_text_table[i1].tag, "(\\r)") do
+                table.insert(r_tags, r_tags_in_order)
+            end
+            tag_text_table[i1].tag = utf8.gsub(tag_text_table[i1].tag, "\\r[^\\}]+", "", #r_tags - 1)
+            local r_style_name = utf8.match(tag_text_table[i1].tag, "\\r([^\\}]+)")
+            r_style_values = {}
+            for i2 = 1, #subtitles do
+                if subtitles[i2].class == "style" then
+                    local styleclass = subtitles[i2]
+                    if r_style_name == styleclass.name then
+                        required_style = styleclass
+                        break
+                    end
+                end
+            end
+            for i3 = 1, #RTl.style_names do
+                r_style_values[i3] = required_style[RTl.style_names[i3]]
+            end
+            for i4 = 5, 8 do
+                r_style_values[i4] = utf8.gsub(r_style_values[i4], "H%x%x", "H")
+            end
+            for i5 = 9,12 do
+                r_style_values[i5] = utf8.match(r_style_values[i5], "&H%x%x") .. "&"
+            end
+            local before_r = utf8.match(tag_text_table[i1].tag, "(.+)\\r")
+            local after_r = utf8.match(tag_text_table[i1].tag, "\\r[^\\}]+(.+)")
+            local rtag = utf8.match(tag_text_table[i1].tag, "\\r[^\\}]+")
+            for i6 = 1, #RTl.style_tags do
+                before_r = utf8.gsub(before_r, RTl.style_tags[i6] .. "[^\\}]+", "")
+                if utf8.match(after_r, RTl.style_tags[i6]) == nil then
+                    local val = r_style_values[i6]
+                    if type(val) == "string" or type(val) == "number" then
+                        rtag = utf8.gsub(rtag, "(\\r[^\\}]+)", "%1" .. RTl.style_tags[i6] .. val)
+                    else
+                        if val then
+                            rtag = utf8.gsub(rtag, "(\\r[^\\}]+)", "%1" .. RTl.style_tags[i6] .. "1")
+                        else
+                            rtag = utf8.gsub(rtag, "(\\r[^\\}]+)", "%1" .. RTl.style_tags[i6] .. "0")
+                        end
+                    end
+                end
+            end
+            tag_text_table[i1].tag = before_r .. rtag .. after_r
+            tag_text_table[i1].tag = utf8.gsub(tag_text_table[i1].tag, "\\r[^\\}]+", "")
+        end
+    end
+    return tag_text_table
+end
+
+function remove_effectless_tags_inside_t(tag_text_table)
+    repeat
+        local there_is_effectless_t_tag = false
+        for i = 1, #tag_text_table do
+            for x = 1, #RTl.transform_tags do
+                if utf8.match(tag_text_table[i].tag, RTl.changed_transform_tags[x]) then
+                    local after_t_tag = utf8.match(tag_text_table[i].tag, RTl.changed_transform_tags[x] .. "[^¡%)]+(.+)")
+                    if utf8.match(after_t_tag, RTl.transform_tags[x]) then
+                        there_is_effectless_t_tag = true
+                        tag_text_table[i].tag = utf8.gsub(tag_text_table[i].tag, RTl.changed_transform_tags[x] .. "[^¡%)]+", "", 1)
+                        tag_text_table[i].tag = utf8.gsub(tag_text_table[i].tag, "\\t%([^¡%)]-%)", "")
+                    end
+                end
+            end
+        end
+    until not there_is_effectless_t_tag
+
+    return tag_text_table
+end
+
+function retutn_tags_inside_t_to_notmal(tag_text_table)
+    repeat
+        local there_is_¡_inside_t = false
+        for i = 1, #tag_text_table do
+            if utf8.match(tag_text_table[i].tag, "\\t%([^%(%)¡]-¡") then
+                there_is_¡_inside_t = true
+                tag_text_table[i].tag = utf8.gsub(tag_text_table[i].tag, "(\\t%([^%(%)¡]-)¡", "%1\\")
+            end
+        end
+    until not there_is_¡_inside_t
+
+    return tag_text_table
+end
+
+function prepare_t_tags(text)
+    local result = {}
+
+    local breaks_table = segmentation_based_on_breaks(text)
+
+    local breaks_tag_text_table = {}
+    for i = 1, #breaks_table do
+        breaks_table[i] = (utf8.match(breaks_table[i], "^{") == nil) and "{}" .. breaks_table[i] or breaks_table[i]
+        breaks_tag_text_table[i] = segmentation_based_on_tags(breaks_table[i])
+    end
+
+    result = separate_t_tags(breaks_tag_text_table)
+
+    result = handle_alpha_inside_t(result)
+
+    result = ensure_there_is_one_tag_inside_each_t(result)
+
+    result = find_out_what_t_tags_are_given_to_each_section(breaks_tag_text_table, result)
+    
+    return result
+end
+
+function separate_t_tags(breaks_tag_text_table)
+    local result = {}
+
+    for x1 = 1, #breaks_tag_text_table do
+        local t_tags_for_each_line = {}
+        for x2 = 1, #breaks_tag_text_table[x1] do
+            local t_tags_for_each_override_block = {}
+            if utf8.match(breaks_tag_text_table[x1][x2].tag, "\\t") then
+                for each_t_tag in utf8.gmatch(breaks_tag_text_table[x1][x2].tag, "(\\t%([^%(%)]-%))") do
+                    table.insert(t_tags_for_each_override_block, each_t_tag)
+                end
+            else
+                t_tags_for_each_override_block[1] = ""
+            end
+            for x3 = 1, #t_tags_for_each_override_block do
+                if t_tags_for_each_line[x2] == nil then
+                    t_tags_for_each_line[x2] = t_tags_for_each_override_block[x3]
+                else
+                    t_tags_for_each_line[x2] = t_tags_for_each_line[x2] .. t_tags_for_each_override_block[x3]
+                end
+            end
+        end
+        result[x1] = t_tags_for_each_line
+    end
+
+    return result
+end
+
+function handle_alpha_inside_t(separated_t_tags)
+    for x1 = 1, #separated_t_tags do
+        for x2 = 1, #separated_t_tags[x1] do
+            separated_t_tags[x1][x2] = utf8.gsub(separated_t_tags[x1][x2], "\\alpha([^\\%)]+)", "\\1a%1\\2%1\\3a%1\\4a%1")
+        end
+    end
+
+    return separated_t_tags
+end
+
+function ensure_there_is_one_tag_inside_each_t(separated_t_tags)
+    repeat
+        local there_is_more_than_one_tag_inside_each_t = false
+        for x1 = 1, #separated_t_tags do
+            for x2 = 1, #separated_t_tags[x1] do
+                if utf8.match(separated_t_tags[x1][x2], "\\t%([^\\%(%)]-\\[^\\%(%)]+\\") then
+                    there_is_more_than_one_tag_inside_each_t = true
+                    separated_t_tags[x1][x2] = utf8.gsub(separated_t_tags[x1][x2], "\\t%(([^\\%(%)]-)\\([^\\%)]+)", "\\t%(%1\\%2%)\\t%(%1")
+                    separated_t_tags[x1][x2] = utf8.gsub(separated_t_tags[x1][x2], "\\t%([^\\%)]-%)", "")
+                end
+            end
+        end
+    until not there_is_more_than_one_tag_inside_each_t
+
+    return separated_t_tags
+end
+
+function find_out_what_t_tags_are_given_to_each_section(breaks_tag_text_table, separated_t_tags)
+    breaks_tag_text_table = remove_t_tags(breaks_tag_text_table)
+
+    for i = 1, #RTl.transform_tags do
+        desierd_t_tags = {}
+        for x1 = 1, #separated_t_tags do
+            desierd_t_tags_for_each_line = {}
+            for x2 = 1, #separated_t_tags[x1] do
+                the_line_that_has_the_first_tag_outside_t = 1
+                the_block_that_has_the_first_tag_outside_t = 1
+
+                local the_first_real_tag_is_in_the_same_line = false
+                for y2 = x2,1,-1 do
+                    if utf8.match(breaks_tag_text_table[x1][y2].tag, RTl.transform_tags[i]) then
+                        the_line_that_has_the_first_tag_outside_t = x1
+                        the_block_that_has_the_first_tag_outside_t = y2
+                        the_first_real_tag_is_in_the_same_line = true
+                        break
+                    end
+                end
+                if not the_first_real_tag_is_in_the_same_line then
+                    for y1 = x1-1, 1, -1 do
+                        for y2 = #breaks_tag_text_table[y1], 1, -1 do
+                            if utf8.match(breaks_tag_text_table[y1][y2].tag, RTl.transform_tags[i]) then
+                                the_line_that_has_the_first_tag_outside_t = y1
+                                the_block_that_has_the_first_tag_outside_t = y2
+                                goto found_real_tag
+                            end
+                        end
+                    end
+                    ::found_real_tag::
+                end
+
+                desierd_t_tags_for_each_block = {}
+                if the_line_that_has_the_first_tag_outside_t < x1 then
+                    for z2 = the_block_that_has_the_first_tag_outside_t, #separated_t_tags[the_line_that_has_the_first_tag_outside_t] do
+                        for required_t_tags in utf8.gmatch(separated_t_tags[the_line_that_has_the_first_tag_outside_t][z2], "\\t%([^\\%(%)]-" .. RTl.transform_tags[i] .. "[^\\%(%)]+%)") do
+                            table.insert(desierd_t_tags_for_each_block, required_t_tags)
+                        end
+                    end
+                    for z1 = the_line_that_has_the_first_tag_outside_t + 1, x1 - 1 do
+                        for z2 = 1, #separated_t_tags[z1] do
+                            for required_t_tags in utf8.gmatch(separated_t_tags[z1][z2], "\\t%([^\\%(%)]-" .. RTl.transform_tags[i] .. "[^\\%(%)]+%)") do
+                                table.insert(desierd_t_tags_for_each_block, required_t_tags)
+                            end
+                        end
+                    end
+                    for z2 = 1, x2 do
+                        for required_t_tags in utf8.gmatch(separated_t_tags[x1][z2], "\\t%([^\\%(%)]-" .. RTl.transform_tags[i] .. "[^\\%(%)]+%)") do
+                            table.insert(desierd_t_tags_for_each_block, required_t_tags)
+                        end
+                    end
+                else
+                    for z2 = the_block_that_has_the_first_tag_outside_t, x2 do
+                        for required_t_tags in utf8.gmatch(separated_t_tags[x1][z2], "\\t%([^\\%(%)]-" .. RTl.transform_tags[i] .. "[^\\%(%)]+%)") do
+                            table.insert(desierd_t_tags_for_each_block, required_t_tags)
+                        end
+                    end
+                end
+                
+                desierd_t_tags_for_each_line[x2] = desierd_t_tags_for_each_block
+            end
+            desierd_t_tags[x1] = desierd_t_tags_for_each_line
+        end
+
+        for a1 = 1, #desierd_t_tags do
+            for a2 = 1, #desierd_t_tags[a1] do
+                separated_t_tags[a1][a2] = utf8.gsub(separated_t_tags[a1][a2], "\\t%([^\\%(%)]-" .. RTl.transform_tags[i] .. "[^\\%(%)]+%)", "")
+                for a3 = #desierd_t_tags[a1][a2], 1, -1 do
+                    separated_t_tags[a1][a2] = desierd_t_tags[a1][a2][a3] .. separated_t_tags[a1][a2]
+                end
+            end
+        end
+    end
+
+    return separated_t_tags
+end
+
+function prepare_2nd_step(text)
+    local result = {}
+
+    local breaks_table = segmentation_based_on_breaks(text)
+
+    local breaks_tag_text_table = {}
+    for i = 1, #breaks_table do
+        breaks_table[i] = (utf8.match(breaks_table[i], "^{") == nil) and "{}" .. breaks_table[i] or breaks_table[i]
+        breaks_tag_text_table[i] = segmentation_based_on_tags(breaks_table[i])
+    end
+
+    breaks_tag_text_table = remove_t_tags(breaks_tag_text_table)
+
+    breaks_tag_text_table = add_required_tags_to_each_line(breaks_tag_text_table)
+
+    for x1 = 1, #breaks_tag_text_table do
+        result[x1] = ""
+        for x2 = 1, #breaks_tag_text_table[x1] do
+            result[x1] = result[x1] .. breaks_tag_text_table[x1][x2].tag .. breaks_tag_text_table[x1][x2].text
+        end
+    end
+
+    return result
+end
+
+function add_required_tags_to_each_line(breaks_tag_text_table)
+    for i = 1, #RTl.all_override_tags do
+        local the_tag_that_should_be_added = nil
+        for x1 = 1, #breaks_tag_text_table do
+            if utf8.match(breaks_tag_text_table[x1][1].tag, RTl.all_override_tags[i]) == nil then
+                for y1 = x1 - 1, 1, -1 do
+                    for y2 = #breaks_tag_text_table[y1], 1, -1 do
+                        if utf8.match(breaks_tag_text_table[y1][y2].tag, RTl.all_override_tags[i] .. "[^\\}]+") then
+                            the_tag_that_should_be_added = utf8.match(breaks_tag_text_table[y1][y2].tag, RTl.all_override_tags[i] .. "[^\\}]+")
+                            breaks_tag_text_table[x1][1].tag = utf8.gsub(breaks_tag_text_table[x1][1].tag, "{", "{" .. the_tag_that_should_be_added)
+                            goto found_the_tag
+                        end
+                    end
+                end
+            end
+            ::found_the_tag::
+        end
+    end
+
+    return breaks_tag_text_table
+end
+
+function reverse_each_line(initial_values, breaks_table, t_tags)
+    local result = ""
+
+    local btt_table = {} -- breaks_tag_text_table
+    for i = 1, #breaks_table do
+        breaks_table[i] = (utf8.match(breaks_table[i], "^{") == nil) and "{}" .. breaks_table[i] or breaks_table[i]
+        btt_table[i] = segmentation_based_on_tags(breaks_table[i])
+    end
+
+    local reversed_tags_without_t_alpha_r = {}
+    local reversed_t_tags = {}
+    for x1 = 1, #btt_table do
+        btt_table[x1] = reverse_non_override_tags(btt_table[x1])
+
+        for y1 = x1 - 1, 1, -1 do
+            if utf8.match(btt_table[y1][1].text, "th¡s ¡s soft not hard") then
+                if reversed_tags_without_t_alpha_r[y1][#reversed_tags_without_t_alpha_r[y1]] ~= "{\\q2}" then
+                    reversed_tags_without_t_alpha_r[y1][#reversed_tags_without_t_alpha_r[y1] + 1] = "{\\q2}"
+                end
+            end
+        end
+        local all_initial_values = adjust_initial_values_for_all_tags(initial_values[1], reversed_tags_without_t_alpha_r, x1)
+        if utf8.match(btt_table[x1][1].text, "th¡s ¡s soft not hard") then
+            all_initial_values[34] = 2
+        end
+
+        btt_table[x1] = give_appropriate_tags_to_each_block_based_on_other_blocks(btt_table[x1])
+
+        btt_table[x1] = give_appropriate_tags_to_each_block_based_on_initial_values(btt_table[x1], all_initial_values)
+
+        btt_table[x1] = remove_unnecessary_tags_from_each_block_based_on_other_blocks(btt_table[x1])
+
+        local transform_initial_values = adjust_initial_values_for_transform_tags(initial_values[2], reversed_tags_without_t_alpha_r, x1)
+
+        btt_table[x1] = control_the_scope_of_t_tags_effect_by_adding_tag(btt_table[x1], t_tags[x1], transform_initial_values)
+
+        btt_table[x1] = add_t_tags(btt_table[x1], t_tags[x1])
+
+        btt_table[x1] = control_the_scope_of_t_tags_effect_by_replacing_t_tags(btt_table[x1])
+
+        local finalized_t_tags = separate_and_adjust_t_tags(btt_table[x1])
+        for x2 = 1, #btt_table[x1] do
+            btt_table[x1][x2].tag = utf8.gsub(btt_table[x1][x2].tag, "(\\t%([^%(%)]+%))", "")
+        end
+
+        btt_table[x1] = remove_unnecessary_tags_from_each_block_based_on_initial_values(btt_table[x1], all_initial_values, finalized_t_tags)
+
+        btt_table[x1] = ensure_t_tags_from_different_lines_do_not_effect_this_line(btt_table[x1], reversed_t_tags, reversed_tags_without_t_alpha_r, transform_initial_values)
+
+
+        reversed_tags_without_t_alpha_r_for_this_line = {}
+        for x2 = 1, #btt_table[x1] do
+            reversed_tags_without_t_alpha_r_for_this_line[x2] = btt_table[x1][x2].tag
+        end
+        reversed_tags_without_t_alpha_r[x1] = reversed_tags_without_t_alpha_r_for_this_line
+
+
+        btt_table[x1] = return_r(btt_table[x1], all_initial_values)
+
+        btt_table[x1] = return_ahpha(btt_table[x1])
+
+        btt_table[x1] = add_t_tags(btt_table[x1], finalized_t_tags)
+
+
+        reversed_t_tags[x1] = finalized_t_tags
+
+        
+        breaks_table[x1] = ""
+        for x2 = #btt_table[x1], 1, -1 do
+            breaks_table[x1] = breaks_table[x1] .. btt_table[x1][x2].tag .. btt_table[x1][x2].text
+        end
+
+        breaks_table[x1] = utf8.gsub(breaks_table[x1], "([^{}]+){}([^{}]+)", "%1%2")
+    end
+
+    local wrapstyle = get_warpstyle(subtitles)
+    breaks_table = add_N_and_n(breaks_table, btt_table, wrapstyle)
+
+    for i = 1, #breaks_table do
+        result = result .. breaks_table[i]
+    end
+
+    return result
+end
+
+function reverse_non_override_tags(tag_text_table)
+    local tt_table = tag_text_table
+    for i = 1, #RTl.non_override_tags do
+        non_override_tags_table = {}
+        for j1 = 1, #tt_table do
+            if utf8.match(tt_table[j1].tag, RTl.non_override_tags[i]) then
+                non_override_tags_table[j1] = utf8.match(tt_table[j1].tag, RTl.non_override_tags[i] .. "[^\\}]+")
+                tt_table[j1].tag = utf8.gsub(tt_table[j1].tag, RTl.non_override_tags[i] .. "[^\\}]+", "")
+            else
+                non_override_tags_table[j1] = ""
+            end
+        end
+        for j2 = 1, #tt_table do
+            tt_table[j2].tag = utf8.gsub(tt_table[j2].tag, "{", "{" .. non_override_tags_table[#tt_table - j2 + 1])
+        end
+    end
+
+    return tt_table
+end
+
+function adjust_initial_values_for_all_tags(initial_val, reversed_tags_wo_tar, x1)
+    for i = 1, #RTl.all_override_tags do
+        for y1 = x1 - 1, 1, -1 do
+            for y2 = 1, #reversed_tags_wo_tar[y1] do
+                if utf8.match(reversed_tags_wo_tar[y1][y2], RTl.all_override_tags[i]) then
+                    initial_val[i] = utf8.match(reversed_tags_wo_tar[y1][y2], RTl.all_override_tags[i] .. "([^\\}]+)")
+                    goto found_the_required_tag
+                end
+            end
+        end
+        ::found_the_required_tag::
+    end
+
+    return initial_val
+end
+
+function give_appropriate_tags_to_each_block_based_on_other_blocks(tt_table)
+    local the_tag_that_should_be_added = nil
+    for i = 1, #RTl.all_override_tags do
+        for j = #tt_table, 1, -1 do
+            if utf8.match(tt_table[j].tag, RTl.all_override_tags[i]) == nil then
+                for g = j - 1, 1, -1 do
+                    if utf8.match(tt_table[g].tag, RTl.all_override_tags[i]) then
+                        the_tag_that_should_be_added = utf8.match(tt_table[g].tag, RTl.all_override_tags[i] .. "[^\\}]+")
+                        tt_table[j].tag = utf8.gsub(tt_table[j].tag, "{", "{" .. the_tag_that_should_be_added)
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    return tt_table
+end
+
+function give_appropriate_tags_to_each_block_based_on_initial_values(tt_table, all_initial_values)
+    for i = 1, #RTl.all_override_tags do
+        for j = 1, #tt_table do
+            if utf8.match(tt_table[j].tag, RTl.all_override_tags[i]) == nil then
+                local int = all_initial_values[i]
+                if type(int) == "string" or type(int) == "number" then
+                    tt_table[j].tag = utf8.gsub(tt_table[j].tag, "{","{" .. RTl.all_override_tags[i] .. int)
+                else
+                    if int then
+                        tt_table[j].tag = utf8.gsub(tt_table[j].tag, "{", "{" .. RTl.all_override_tags[i] .. "1")
+                    else
+                        tt_table[j].tag = utf8.gsub(tt_table[j].tag, "{", "{" .. RTl.all_override_tags[i] .. "0")
+                    end
+                end
+            end
+        end
+    end
+
+    return tt_table
+end
+
+function remove_unnecessary_tags_from_each_block_based_on_other_blocks(tt_table)
+    local first_tag = nil
+    local found_tag = nil
+    for i = 1, #RTl.all_override_tags do
+        for j = #tt_table, 1, -1 do
+            if utf8.match(tt_table[j].tag, RTl.all_override_tags[i]) then
+                for g = j + 1, #tt_table do
+                    if utf8.match(tt_table[g].tag, RTl.all_override_tags[i]) then
+                        first_tag = utf8.match(tt_table[j].tag, RTl.all_override_tags[i] .. "[^\\}]+")
+                        found_tag = utf8.match(tt_table[g].tag, RTl.all_override_tags[i] .. "[^\\}]+")
+                        if first_tag == found_tag then
+                            tt_table[j].tag = utf8.gsub(tt_table[j].tag, RTl.all_override_tags[i] .. "[^\\}]+", "")
                         end
                         break
                     end
                 end
             end
         end
-        tablo[1].tag=tablo[1].tag:gsub("{\\q"..warp,"{")
-        stext = ""
-        for s = 1,#tablo do
-            stext = stext .. tablo[s].tag .. tablo[s].text
-        end
-        stext = stext:gsub("{}","")
-        :gsub("《《([^\\{}]-)》》","{%1}")
+    end
 
-        line.text = stext
-        sub[i] = line
+    return tt_table
+end
+
+function remove_unnecessary_tags_from_each_block_based_on_initial_values(tt_table, all_initial_values, finalized_t_tags)
+    for i = 1, #RTl.all_override_tags do
+        for j = #tt_table, 1, -1 do
+            if utf8.match(tt_table[j].tag, RTl.all_override_tags[i]) then
+                local found_next_tag = false
+                for g = j + 1, #tt_table do
+                    if utf8.match(tt_table[g].tag, RTl.all_override_tags[i]) or utf8.match(finalized_t_tags[g], RTl.all_override_tags[i]) then
+                        found_next_tag = true
+                        break
+                    end
+                end
+                if not found_next_tag then
+                    local int = all_initial_values[i]
+                    if type(int) == "string" or type(int) == "number" then
+                        int = tostring(int)
+                        if utf8.match(tt_table[j].tag, RTl.all_override_tags[i] .. "[^\\}]+") ~= RTl.all_override_tags[i] .. int then
+                            break
+                        else
+                            tt_table[j].tag = utf8.gsub(tt_table[j].tag, RTl.all_override_tags[i] .. "[^\\}]+", "")
+                        end
+                    else
+                        if int then
+                            if utf8.match(tt_table[j].tag, RTl.all_override_tags[i] .. "[^\\}]+") ~= RTl.all_override_tags[i] .. "1" then
+                                break
+                            else
+                                tt_table[j].tag = utf8.gsub(tt_table[j].tag, RTl.all_override_tags[i] .. "[^\\}]+", "")
+                            end
+                        else
+                            if utf8.match(tt_table[j].tag, RTl.all_override_tags[i] .. "[^\\}]+") ~= RTl.all_override_tags[i] .. "0" then
+                                break
+                            else
+                                tt_table[j].tag = utf8.gsub(tt_table[j].tag, RTl.all_override_tags[i] .. "[^\\}]+", "")
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return tt_table
+end
+
+function adjust_initial_values_for_transform_tags(initial_val, reversed_tags_wo_tar, x1)
+    for i = 1, #RTl.transform_tags do
+        for y1 = x1 - 1, 1, -1 do
+            for y2 = 1, #reversed_tags_wo_tar[y1] do
+                if utf8.match(reversed_tags_wo_tar[y1][y2], RTl.transform_tags[i]) then
+                    initial_val[i] = utf8.match(reversed_tags_wo_tar[y1][y2], RTl.transform_tags[i] .. "([^\\}]+)")
+                    goto found_the_required_tag_for_t
+                end
+            end
+        end
+        ::found_the_required_tag_for_t::
+    end
+
+    return initial_val
+end
+
+function control_the_scope_of_t_tags_effect_by_adding_tag(tt_table, t_tags, t_initial_values)
+    local the_tag_that_should_be_added = nil
+    for i = 1, #RTl.transform_tags do
+        for j = 1, #tt_table do
+            if utf8.match(t_tags[j], RTl.transform_tags[i]) then
+                if j > 1 then
+                    if utf8.match(tt_table[j - 1].tag, RTl.transform_tags[i]) == nil then
+                        for g = j, #tt_table do
+                            if utf8.match(tt_table[g].tag, RTl.transform_tags[i]) then
+                                the_tag_that_should_be_added = utf8.match(tt_table[g].tag, RTl.transform_tags[i] .. "[^\\}]+")
+                                tt_table[j - 1].tag = utf8.gsub(tt_table[j - 1].tag, "{", "{" .. the_tag_that_should_be_added)
+                            end
+                        end
+                    end
+                    if utf8.match(tt_table[j - 1].tag, RTl.transform_tags[i]) == nil then
+                        tt_table[j - 1].tag = utf8.gsub(tt_table[j - 1].tag, "{", "{" .. RTl.transform_tags[i] .. t_initial_values[i])
+                    end
+                end
+            end
+        end
+    end
+
+    return tt_table
+end
+
+function add_t_tags(tt_table, t_tags)
+    for j = 1, #tt_table do
+        tt_table[j].tag = utf8.gsub(tt_table[j].tag, "}", t_tags[j] .. "}")
+    end
+
+    return tt_table
+end
+
+function control_the_scope_of_t_tags_effect_by_replacing_t_tags(tt_table)
+    local last_tag_place = 0
+    local last_t_tag_place = -1
+    local the_t_tag_that_should_be_moved = nil
+    for i = 1, #RTl.transform_tags do
+        for j = #tt_table, 1, -1 do
+            if utf8.match(tt_table[j].tag, RTl.transform_tags[i]) == nil then
+                for g1 = j - 1, 1, -1 do
+                    if utf8.match(tt_table[g1].tag, RTl.transform_tags[i]) then
+                        last_tag_place = g1
+                        break
+                    end
+                end
+                for g2 = j - 1, 1, -1 do
+                    if utf8.match(tt_table[g2].tag, "\\t%([^\\%(%)]-" .. RTl.transform_tags[i]) then
+                        last_t_tag_place = g2
+                        break
+                    end
+                end
+                if last_tag_place <= last_t_tag_place then
+                    if utf8.match(tt_table[last_t_tag_place].tag, "\\t%([^\\%(%)]-" .. RTl.transform_tags[i]) then
+                        for a = 1, #utf8.match(tt_table[last_t_tag_place].tag, "\\t%([^\\%(%)]-" .. RTl.transform_tags[i]) do
+                            the_t_tag_that_should_be_moved = utf8.match(tt_table[last_t_tag_place].tag, "\\t%([^\\%(%)]-" .. RTl.transform_tags[i] .. "[^\\%(%)]+%)")
+                            if the_t_tag_that_should_be_moved ~= nil then
+                                tt_table[j].tag = utf8.gsub(tt_table[j].tag, "{", "{" .. the_t_tag_that_should_be_moved)
+                                tt_table[last_t_tag_place].tag = utf8.gsub(tt_table[last_t_tag_place].tag, "\\t%([^\\%(%)]-" .. RTl.transform_tags[i] .. "[^\\%(%)]+%)", "", 1)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return tt_table
+end
+
+function ensure_t_tags_from_different_lines_do_not_effect_this_line(tt_table, reversed_t_tags, reversed_tags_wo_tar, t_initial_values)
+    for i = 1, #RTl.transform_tags do
+        if utf8.match(tt_table[#tt_table].tag, RTl.transform_tags[i]) == nil then
+            last_t_tag_line = 0
+            last_t_tag_block = 0
+            for y1 = #reversed_t_tags, 1, -1 do
+                for y2 = 1, #reversed_t_tags[y1] do
+                    if utf8.match(reversed_t_tags[y1][y2], RTl.transform_tags[i]) then
+                        last_t_tag_line = y1
+                        last_t_tag_block = y2
+                        goto found_last_t_tag
+                    end
+                end
+            end
+            ::found_last_t_tag::
+            last_real_tag_line = 0
+            last_real_tag_block = -1
+            for z1 = #reversed_tags_wo_tar, 1, -1 do
+                for z2 = 1, #reversed_tags_wo_tar[z1] do
+                    if utf8.match(reversed_tags_wo_tar[z1][z2], RTl.transform_tags[i]) then
+                        last_real_tag_line = z1
+                        last_real_tag_block = z2
+                        goto found_last_real_tag
+                    end
+                end
+            end
+            ::found_last_real_tag::
+            if last_real_tag_line <= last_t_tag_line then
+                if last_t_tag_block <= last_real_tag_block then
+                    tt_table[#tt_table].tag = utf8.gsub(tt_table[#tt_table].tag, "{", "{" .. RTl.transform_tags[i] .. t_initial_values[i])
+                end
+            end
+        end
+    end
+
+    return tt_table
+end
+
+function separate_and_adjust_t_tags(tt_table)
+    local result = {}
+
+    for j = 1, #tt_table do
+        t_tags_for_each_override_block = {}
+        if utf8.match(tt_table[j].tag, "\\t") then
+            for each_t_tag in utf8.gmatch(tt_table[j].tag, "(\\t%([^%(%)]-%))") do
+                table.insert(t_tags_for_each_override_block, each_t_tag)
+            end
+        else
+            t_tags_for_each_override_block[1] = ""
+        end
+
+        t_tags_for_each_override_block = merge_t_tags_with_same_tta(t_tags_for_each_override_block) -- tta: start time, end time and accel
+
+        t_tags_for_each_override_block = return_alpha_for_t(t_tags_for_each_override_block)
+        
+        for i = 1, #t_tags_for_each_override_block do
+            if result[j] == nil then
+                result[j] = t_tags_for_each_override_block[i]
+            else
+                result[j] = result[j] .. t_tags_for_each_override_block[i]
+            end
+        end
+    end
+
+    return result
+end
+
+function merge_t_tags_with_same_tta(t_tags_for_each_override_block)
+    local t_tags = t_tags_for_each_override_block
+
+    local the_t_tag_that_should_be_merged = nil
+    for i1 = 1, #t_tags do
+        if t_tags[i1] ~= "" then
+            for i2 = i1 + 1, #t_tags do
+                if t_tags[i2] ~= "" and utf8.match(t_tags[i1], "\\t%(([^\\%(%)]*)") == utf8.match(t_tags[i2], "\\t%(([^\\%(%)]*)") then
+                    the_t_tag_that_should_be_merged = utf8.match(t_tags[i2], "\\t%([^\\%(%)]-(\\[^%(%)]+)%)")
+                    t_tags[i1] = utf8.gsub(t_tags[i1], "%)", the_t_tag_that_should_be_merged .. "%)")
+                    t_tags[i2] = ""
+                end
+            end
+        end
+    end
+
+    return t_tags
+end
+
+function return_alpha_for_t(t_tags_for_each_override_block)
+    local t_tags = t_tags_for_each_override_block
+    
+    repeat
+        local there_are_a_tags_that_should_be_replaced_with_alpha = false
+        for i = 1, #t_tags do
+            if utf8.match(t_tags[i], "\\1a") then
+                if utf8.match(t_tags[i], "\\2a") then
+                    if utf8.match(t_tags[i], "\\3a") then
+                        if utf8.match(t_tags[i], "\\4a") then
+                            if utf8.match(t_tags[i], "\\1a([^\\%)]+)") == utf8.match(t_tags[i], "\\2a([^\\%)]+)") then
+                                if utf8.match(t_tags[i], "\\2a([^\\%)]+)") == utf8.match(t_tags[i], "\\3a([^\\%)]+)") then
+                                    if utf8.match(t_tags[i], "\\3a([^\\%)]+)") == utf8.match(t_tags[i], "\\4a([^\\%)]+)") then
+                                        there_are_a_tags_that_should_be_replaced_with_alpha = true
+                                        t_tags[i] = utf8.gsub(t_tags[i], "\\2a[^\\%)]+", "", 1)
+                                        t_tags[i] = utf8.gsub(t_tags[i], "\\3a[^\\%)]+", "", 1)
+                                        t_tags[i] = utf8.gsub(t_tags[i], "\\4a[^\\%)]+", "", 1)
+                                        t_tags[i] = utf8.gsub(t_tags[i], "\\1a([^\\%)]+)", "\\alpha%1", 1)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    until not there_are_a_tags_that_should_be_replaced_with_alpha
+
+    return t_tags
+end
+
+function return_r(tt_table, all_initial_values)
+    for j = 1, #tt_table do
+        local tag_values = {}
+        local at_least_one_value_is_from_tags = false
+        for i = 1, #RTl.style_tags do
+            local found_value_in_tags = false
+            for g = j, #tt_table do
+                if utf8.match(tt_table[g].tag, RTl.style_tags[i]) then
+                    found_value_in_tags = true
+                    tag_values[i] = utf8.match(tt_table[g].tag, RTl.style_tags[i] .. "([^\\}]+)")
+                    break
+                end
+            end
+            if found_value_in_tags then
+                at_least_one_value_is_from_tags = true
+            else
+                tag_values[i] = all_initial_values[i]
+            end
+        end
+        if at_least_one_value_is_from_tags then
+            for a = 1, #tag_values do
+                if type(tag_values[a]) == "string" or type(tag_values[a]) == "number" then
+                    tag_values[a] = tostring(tag_values[a])
+                else
+                    if tag_values[a] then
+                        tag_values[a] = "1"
+                    else
+                        tag_values[a] = "0"
+                    end
+                end
+            end
+            local desierd_style_name = nil
+            for z = 1, #subtitles do
+                local style_values = {}
+                if subtitles[z].class == "style" then
+                    styleclass = subtitles[z]
+                    for b = 1, #RTl.style_names do
+                        style_values[b] = styleclass[RTl.style_names[b]]
+                    end
+                    for b = 5,8 do
+                        style_values[b] = utf8.gsub(style_values[b], "H%x%x", "H")
+                    end
+                    for b = 9,12 do
+                        style_values[b] = utf8.match(style_values[b], "&H%x%x") .. "&"
+                    end
+                    for a = 1, #style_values do
+                        if type(style_values[a]) == "string" or type(style_values[a]) == "number" then
+                            style_values[a] = tostring(style_values[a])
+                        else
+                            if style_values[a] then
+                                style_values[a] = "1"
+                            else
+                                style_values[a] = "0"
+                            end
+                        end
+                    end
+                    local at_least_one_value_does_not_match = false
+                    for r = 1, #RTl.style_names do
+                        if tag_values[r] ~= style_values[r] then
+                            at_least_one_value_does_not_match = true
+                        end
+                    end
+                    if not at_least_one_value_does_not_match then
+                        desierd_style_name = styleclass.name
+                        break
+                    end
+                end
+            end
+            if desierd_style_name ~= nil then
+                for i2 = 1, #RTl.style_tags do
+                    tt_table[j].tag = utf8.gsub(tt_table[j].tag, RTl.style_tags[i2] .. "[^\\}]+", "")
+                end
+                tt_table[j].tag = utf8.gsub(tt_table[j].tag, "{", "{\\r" .. desierd_style_name)
+            end
+        end
+    end
+
+    return tt_table
+end
+
+function return_ahpha(tt_table)
+    for j = 1, #tt_table do
+        if utf8.match(tt_table[j].tag, "\\1a") then
+            if utf8.match(tt_table[j].tag, "\\2a") then
+                if utf8.match(tt_table[j].tag, "\\3a") then
+                    if utf8.match(tt_table[j].tag, "\\4a") then
+                        if utf8.match(tt_table[j].tag, "\\1a([^\\}]+)") == utf8.match(tt_table[j].tag, "\\2a([^\\}]+)") then
+                            if utf8.match(tt_table[j].tag, "\\2a([^\\}]+)") == utf8.match(tt_table[j].tag, "\\3a([^\\}]+)") then
+                                if utf8.match(tt_table[j].tag, "\\3a([^\\}]+)") == utf8.match(tt_table[j].tag, "\\4a([^\\}]+)") then
+                                    tt_table[j].tag = utf8.gsub(tt_table[j].tag, "\\2a[^\\}]+", "")
+                                    tt_table[j].tag = utf8.gsub(tt_table[j].tag, "\\3a[^\\}]+", "")
+                                    tt_table[j].tag = utf8.gsub(tt_table[j].tag, "\\4a[^\\}]+", "")
+                                    tt_table[j].tag = utf8.gsub(tt_table[j].tag, "\\1a([^\\}]+)", "\\alpha%1")
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return tt_table
+end
+
+function add_N_and_n(breaks_table, btt_table, wrapstyle)
+    local b_table = breaks_table
+    for x1 = 2, #b_table do
+        if utf8.match(b_table[x1], "th¡s ¡s soft not hard") then
+            b_table[x1] = utf8.gsub(b_table[x1], "th¡s ¡s soft not hard", "")
+            b_table[x1] = "\\n" .. b_table[x1]
+            local found_q_tag = false
+            for y1 = x1 - 1, 1, -1 do
+                for y2 = 1, #btt_table[y1] do
+                    if utf8.match(btt_table[y1][y2].tag, "\\q") then
+                        found_q_tag = true
+                        if utf8.match(btt_table[y1][y2].tag, "\\q(%d)") ~= "2" then
+                            b_table[x1] = "{\\q2}" .. b_table[x1]
+                        end
+                        goto found_q
+                    end
+                end
+            end
+            ::found_q::
+            if not found_q_tag then
+                if wrapstyle ~= "2" then
+                    b_table[x1] = "{\\q2}" .. b_table[x1]
+                end
+            end
+        else
+            b_table[x1] = "\\N" .. b_table[x1]
+        end
+    end
+
+    return b_table
+end
+
+
+function reverse(line)
+    local line = util.copy(line)
+    
+    -- read in styles and meta
+    local meta,styles=karaskel.collect_head(subtitles,false)
+
+    karaskel.preproc_line(subtitles,meta,styles,line)
+
+    -- convert comments to part of the text
+    line.text = utf8.gsub(line.text, "{([^\\{}]-)}", "《《%1》》")
+
+    -- ensure the line begins with an override tag block
+    line.text = (utf8.match(line.text, "^{") == nil) and "{}" .. line.text or line.text
+
+    -- clean tags and text
+    line.text = utf8.gsub(line.text, "}{", "")
+    line.text = convert_the_tags_to_a_usable_form(line.text, line.style)
+
+    -- handle \clip and \iclip
+    line.text = utf8.gsub(line.text, "(\\t%([^\\%(%)]-)(\\[^%(%)]-)(\\i?clip%([^%)]-%))([^%)]-%))", "%1%2%4%1%3%)")
+    line.text = utf8.gsub(line.text, "(\\t%([^\\%(%)]-)(\\i?clip%([^%)]-%))(\\[^%)]-%))", "%1%3%1%2%)")
+    line.text = utf8.gsub(line.text, "(\\t%([^%(%)]-)%(([^%)]-)%)([^%)]-%))", "%1#%2%$%3")
+    clip_and_iclip = ""
+    for find_clip_and_iclip_outside_t in utf8.gmatch(line.text, "\\i?clip%([^%(%)]-%)") do
+        clip_and_iclip = clip_and_iclip .. find_clip_and_iclip_outside_t
+    end
+    for find_clip_and_iclip_inside_t in utf8.gmatch(line.text, "\\t%([^%(%)]-#[^%)]-%$[^%)]-%)") do
+        clip_and_iclip = clip_and_iclip .. find_clip_and_iclip_inside_t
+    end
+    line.text = utf8.gsub(line.text, "\\i?clip%([^%(%)]-%)", "")
+    line.text = utf8.gsub(line.text, "\\t%([^%(%)]-#[^%)]-%$[^%)]-%)", "")
+
+    -- prepare the text for segmentations
+    line.text = utf8.gsub(line.text, "\\N", "\\N\\N")
+    line.text = "\\N" .. line.text .. "\\N"
+
+    -- prepare the text and tags for the reverse process
+    local wrapstyle = get_warpstyle(subtitles)
+    line.text = prepare_first_step(line, wrapstyle)
+
+    local sorted_and_separated_t_tags = prepare_t_tags(line.text)
+
+    local ready_to_reverse_lines = prepare_2nd_step(line.text)
+
+    local initial_values = get_initial_values(line.styleref, wrapstyle)
+
+    -- reverse
+    line.text = reverse_each_line(initial_values, ready_to_reverse_lines, sorted_and_separated_t_tags)
+
+    -- return \clip and \iclip
+    line.text = utf8.gsub(line.text, "{", "{" .. clip_and_iclip, 1)
+
+    -- convert tags to the appropriate form for output
+    line.text = return_the_tags_to_their_correct_form(line.text, line.style)
+    line.text = utf8.gsub(line.text, "(\\t%([^%(%)]-)#([^%)]-)%$([^%)]-%))", "%1%(%2%)%3")
+
+    -- remove empty blocks
+    line.text = utf8.gsub(line.text, "{}", "")
+
+    -- return comments to their correct form
+    line.text = utf8.gsub(line.text, "《《([^\\{}]-)》》", "{%1}")
+
+    return line
+end
+
+function rtl(text)
+    text = removeRTLChars(text)
+
+    text = utf8.gsub(text, "{([^\\{}]-)}", "《《%1》》")
+
+    text = (utf8.match(text, "^{") == nil) and "{}" .. text or text
+
+    text = convert_the_tags_to_a_usable_form(text)
+
+    text = utf8.gsub(text, "\\N", "\\N\\N")
+    text = "\\N" .. text .. "\\N"
+
+    local tag_text_table = segmentation_based_on_tags(text)
+
+    tag_text_table = change_tags_inside_t(tag_text_table)
+
+    tag_text_table = remove_effectless_tags(tag_text_table)
+
+    local wrapstyle = get_warpstyle(subtitles)
+    tag_text_table = handle_soft_line_breaks(tag_text_table, wrapstyle)
+
+    tag_text_table = retutn_tags_inside_t_to_notmal(tag_text_table)
+
+    local prepared_text = ""
+    for i = 1, #tag_text_table do
+        prepared_text = prepared_text .. tag_text_table[i].tag .. tag_text_table[i].text
+    end
+    prepared_text = "\\N" .. prepared_text
+
+    local breaks_table = segmentation_based_on_breaks(prepared_text)
+
+    for i = 1, #breaks_table do
+        breaks_table[i] = utf8.gsub(breaks_table[i], "}([^{]+)", "}" .. LRM .. RLE .. "%1" .. RLM .. PDF)
+    end
+
+    for i = 2, #breaks_table do
+        if utf8.match(breaks_table[i], "th¡s ¡s soft not hard") then
+            breaks_table[i] = utf8.gsub(breaks_table[i], "th¡s ¡s soft not hard", "")
+            breaks_table[i] = "\\n" .. breaks_table[i]
+        else
+            breaks_table[i] = "\\N" .. breaks_table[i]
+        end
+    end
+
+    local text = ""
+    for i = 1, #breaks_table do
+        text = text .. breaks_table[i]
+    end
+
+    text = return_the_tags_to_their_correct_form(text)
+
+    text = utf8.gsub(text, "{}", "")
+
+    text = utf8.gsub(text, "《《([^\\{}]-)》》", "{%1}")
+
+    return text
+end
+
+function unrtl(line)
+    if utf8.match(line.text, LRM) or utf8.match(line.text, RLE) or utf8.match(line.text, RLM) or utf8.match(line.text, PDF) then
+        line.text = removeRTLChars(line.text)
+        line = reverse(line)
+    end
+    return line.text
+end
+
+-- RTL
+function Rtl(subtitles, selected_lines, active_line)
+    _G.subtitles = subtitles
+
+    for z, i in ipairs(selected_lines) do
+        local line = subtitles[i]
+
+        line = reverse(line)
+        line.text = rtl(line.text)
+
+        subtitles[i] = line
+    end
+    aegisub.set_undo_point(rtl_script_name)
+end
+
+-- Un-RTL
+function Unrtl(subtitles, selected_lines, active_line)
+    _G.subtitles = subtitles
+
+    for z, i in ipairs(selected_lines) do
+        local line = subtitles[i]
+
+        line.text = unrtl(line)
+
+        subtitles[i] = line
+    end
+    aegisub.set_undo_point(unrtl_script_name)
+end
+
+-- RTL (w/o Reverse)
+function rtlwo_reverse(subtitles, selected_lines, active_line)
+    _G.subtitles = subtitles
+
+    for z, i in ipairs(selected_lines) do
+        local line = subtitles[i]
+
+        line.text = rtl(line.text)
+
+        subtitles[i] = line
     end
     aegisub.set_undo_point(rtlwo_reverse_script_name)
 end
@@ -412,12 +1608,14 @@ local function openEditor(str)
 end
 
 function RtlEditor(subtitles, selected_lines)
+    _G.subtitles = subtitles
+
     if #selected_lines > 1 then
         return
     end
     local line = subtitles[selected_lines[1]]
 
-    local text = unrtl(line.text)
+    local text = unrtl(line)
     text = utf8.gsub(text, "\\[Nn]", "\n")
     local btn, newText = openEditor(text)
 
@@ -425,10 +1623,12 @@ function RtlEditor(subtitles, selected_lines)
         return
     end
     newText = utf8.gsub(newText, "\n", "\\N")
-    if btn == editor_btn.Ok then
-        newText = rtl(newText)
-    end
     line.text = newText
+
+    if btn == editor_btn.Ok then
+        line = reverse(line)
+        line.text = rtl(line.text)
+    end
 
     subtitles[selected_lines[1]] = line
 
@@ -438,181 +1638,9 @@ end
 ----- Split at Tags -----
 local Split = {}
 
-Split.puncs = '.:!،«[(»\\])\\- <>'
-Split.line_type_tags = {
-    'pos', 'move', 'clip', 'iclip', 'org', 'fade', 'fad', 'an', 'q'
-}
-Split.style_tags = {
-    'i', 'b', 'u', 's', 'bord', 'xbord', 'ybord', 'shad', 'xshad', 'yshad',
-    'fn', 'fs', 'fscx', 'fscy', 'fsp', 'fe', 'c', '1c', '2c', '3c', '4c',
-    'alpha', '1a', '2a', '3a', '4a', 'an', 'r', 'frz', 'fr'
-}
-Split.non_style_tags = {
-    'be', 'blur', 'frx', 'fry', 'fax', 'fay', 'k', 'K', 'kf', 'ko', 'q',
-    'pos', 'move', 'org', 'fad', 'fade', 't', 'clip', 'iclip', 'p', 'pbo'
-}
-Split.style_names_tags = {
-    { 'fontname', 'fn' }, { 'fontsize', 'fs' },
-    { 'color1', '1c', '1a' }, { 'color2', '2c', '2a' }, { 'color3', '3c', '3a' }, { 'color4', '4c', '4a' },
-    { 'bold', 'b' }, { 'italic', 'i' }, { 'underline', 'u' }, { 'strikeout', 's' },
-    { 'scale_x', 'fscx' }, { 'scale_y', 'fscy' }, { 'spacing', 'fsp' }, { 'angle', 'frz' },
-    { 'outline', 'bord' }, { 'shadow', 'shad' }, { 'align', 'an' }, { 'encoding', 'fe' }
-}
-Split.simple_text_value_tags = {
-    'fn', 'alpha', '1a', '2a', '3a', '4a', 'c', '1c', '2c', '3c', '4c', 'r'
-}
-Split.boolean_style_fields = {
-    'bold', 'italic', 'underline', 'strikeout'
-}
-
-function Split:parse_style(styleref)
-    local tags = {}
-    -- extract Split.style_names_tags
-    for i = 1, #Split.style_names_tags do
-        local table = Split.style_names_tags[i]
-        local style_name = table[1]
-        local tag_name1 = table[2]
-        local value = styleref[style_name]
-        if re.match(style_name, 'color') ~= nil then
-            tags[tag_name1] = re.sub(value, '&H..(.+)', '&H\\1')
-            tags[table[3]] = re.match(value, '&H..')[1].str
-        else
-            if has_value(Split.boolean_style_fields, style_name) then
-                if value then
-                    value = 1
-                else
-                    value = 0
-                end
-            end
-            tags[tag_name1] = value
-        end
-    end
-    -- add other defaults
-    tags['be'] = 0
-    tags['blur'] = 0
-    tags['frx'] = 0
-    tags['fry'] = 0
-    tags['fax'] = 0
-    tags['fay'] = 0
-    tags['pbo'] = 0
-    return tags
-end
-
-function Split:parse_tags(tags, line_tags, current_appearance) -- TODO: add r support
-    -- handle t tags
-    local t_tags = {}
-    for t in tags:gmatch("\\t%b()") do -- Thanks lyger!
-        table.insert(t_tags, t)
-    end
-    tags = tags:gsub("\\t%b()", "") -- remove t tags
-    if #t_tags > 0 then -- add to table
-        current_appearance["t"] = t_tags
-    end
-
-    -- other tags
-    for t in tags:gmatch("\\[^\\{}]*") do
-        local tag, value = "", ""
-        if t:match("\\fn") ~= nil then
-            tag, value = t:match("\\(fn)(.*)")
-        else
-            tag, value = t:match("\\([1-4]?%a+)(%A.*)")
-        end
-
-        if tag == 'fr' then
-            tag = 'frz'
-        elseif tag == 'c' then
-            tag = '1c'
-        end
-
-        -- add line tags to the appropriate list and others to appearance
-        if has_value(Split.line_type_tags, tag) == true then
-            if has_value(line_tags, tag) == false then
-                if tag == 'q' or tag == 'an' then
-                    value = tonumber(value)
-                end
-                line_tags[tag] = value
-            end
-        else
-            if has_value(Split.simple_text_value_tags, tag) == false then
-                value = tonumber(value)
-            end
-            current_appearance[tag] = value
-        end
-    end
-end
-
-function Split:reverse(line)
-    local line = util.copy(line)
-    -- read in styles and meta
-    local meta, styles = karaskel.collect_head(subtitles, false)
-
-    karaskel.preproc_line(subtitles, meta, styles, line)
-
-    -- clean tags and text
-    line.text = re.sub(line.text, '}{', '') -- combine redundant back to back tag parts
-    line.text = re.sub(line.text, '^ +', '') -- trim redundant spaces
-    line.text = re.sub(line.text, '^({[^{}]*}) +', '\\1')
-    line.text = re.sub(line.text, ' +$', '')
-
-    -- make tags-text table
-    local tag_text_table = expand(line.text)
-    -- aegisub.log('Parts:\n'..serializeTable(tag_text_table)..'\n')
-
-    -- reverse process
-    local line_tags = {}
-    line.text = ''
-    -- extract default appearance
-    local parsed_style = Split:parse_style(line.styleref)
-    -- aegisub.log('Parsed Style:\n'..serializeTable(parsed_style)..'\n')
-    local current_appearance = util.deep_copy(parsed_style)
-    -- 1nd step (parse)
-    for i, val in ipairs(tag_text_table) do
-        -- parse tags
-        Split:parse_tags(val.tag, line_tags, current_appearance)
-        val.tag_list = util.deep_copy(current_appearance)
-    end
-    -- aegisub.log('New Parts:\n'..serializeTable(tag_text_table)..'\n')
-
-    -- 2nd step (rebuild)
-    local last_tag_list = parsed_style
-    for i = #tag_text_table, 1, -1 do
-        -- get diff and rebuild tags
-        local val = tag_text_table[i]
-        -- get diff
-        -- aegisub.log('Tag List:\n'..serializeTable(val.tag_list)..'\n')
-        -- aegisub.log('Last Tag List:\n'..serializeTable(last_tag_list)..'\n')
-        local diff = difference(val.tag_list, last_tag_list)
-        last_tag_list = val.tag_list
-        -- aegisub.log('Diff:\n'..serializeTable(diff)..'\n')
-        -- rebuild tags
-        local rebuilt_tag = '{}'
-        for tag, value in pairs(diff) do
-            if tag == "t" then
-                for _, t_tag in ipairs(value) do
-                    rebuilt_tag = rebuilt_tag:gsub("}", t_tag .. "}")
-                end
-            else
-                rebuilt_tag = rebuilt_tag:gsub("{", "{\\" .. tag .. value)
-            end
-        end
-        if i == #tag_text_table then
-            for tag, value in pairs(line_tags) do
-                rebuilt_tag = rebuilt_tag:gsub("{", "{\\" .. tag .. value)
-            end
-        end
-        val.tag = rebuilt_tag
-
-        -- flip spaces
-        val.text, _ = re.sub(val.text, "^( *)(.*?)( *)$", "\\3\\2\\1")
-
-        -- rebuild line
-        line.text = line.text .. val.tag .. val.text
-    end
-
-    return line
-end
-
 function Split:splitAtTags(line)
+    -- handle \r
+    line.text = replace_r_with_tags(line.text, line.style)
     -- Convert float to neatly formatted string
     local function float2str(f)
         return string.format("%.3f", f):gsub("%.(%d-)0+$", "%.%1"):gsub("%.$", "")
@@ -688,7 +1716,7 @@ function Split:splitAtTags(line)
     end
 
     -- Returns a table of tag-value pairs
-    -- Supports fn but ignores r because fuck r
+    -- Supports fn but ignores r because fuck r (update: now there is no r)
     local function full_state_subtable(tag)
         -- Store time tags in their own table, so they don't interfere
         local time_tags = {}
@@ -747,7 +1775,7 @@ function Split:splitAtTags(line)
     -- line.text=line.text:gsub("\n([^\n{])","\n{}%1")
 
     -- Make line table
-    local line_table = expand(line.text)
+    local line_table = segmentation_based_on_tags(line.text)
     local lines_added = 0
     local line_table_copy = util.copy(line_table)
     for i, e in ipairs(line_table_copy) do
@@ -1017,7 +2045,7 @@ end
 function Split:splitAtTagsWreverse(line)
     local result = {}
     local line = util.copy(line)
-    result.reverse = Split:reverse(line)
+    result.reverse = reverse(line)
     result.splits = Split:splitAtTags(result.reverse)
     return result
 end
@@ -1052,11 +2080,23 @@ function SplitAtSpaces(subtitles, selected_lines, active_line)
     -- add {} before spaces
     for i, n in ipairs(selected_lines) do
         local line = subtitles[n]
-        local parts = expand(line.text)
+        line = reverse(line)
+        line.text = (utf8.match(line.text, "^{") == nil) and "{}" .. line.text or line.text
+        local parts = segmentation_based_on_tags(line.text)
         line.text = ""
-        for _, p in ipairs(parts) do
-            p.text, _ = re.sub(p.text, "( +)", "{}" .. RLE .. "\\1")
-            line.text = line.text .. p.tag .. p.text
+        for i = 1, #parts do
+            local space_parts = {}
+            for space, not_space in utf8.gmatch(parts[i].text, "( +)([^ ]*)") do
+                table.insert(space_parts, { s = space, n = not_space })
+            end
+            parts[i].text = utf8.gsub(parts[i].text, "([^ ]-) .*", "%1")
+            parts[i].text = "{}" .. parts[i].text
+            for i2 = 1, #space_parts do
+                parts[i].text = "{}" .. space_parts[i2].s .. space_parts[i2].n .. parts[i].text
+            end
+        end
+        for i = 1, #parts do
+            line.text = line.text .. parts[i].tag .. parts[i].text
         end
         lines[i] = line
     end
@@ -1064,7 +2104,7 @@ function SplitAtSpaces(subtitles, selected_lines, active_line)
     local lines_added = 0
     for i, line in ipairs(lines) do
         -- split at tags
-        local result = Split:splitAtTagsWreverse(line)
+        result = Split:splitAtTags(line)
 
         -- add lines
         local num = selected_lines[i]
@@ -1073,7 +2113,7 @@ function SplitAtSpaces(subtitles, selected_lines, active_line)
         l.comment = true
         subtitles[num + lines_added] = l
 
-        for _, s in ipairs(result.splits) do
+        for _, s in ipairs(result) do
             subtitles.insert(num + lines_added + 1, s)
             lines_added = lines_added + 1
         end
@@ -1112,8 +2152,8 @@ function ReverseAtTags(subtitles, selected_lines, active_line)
         local line = subtitles[n + lines_added]
         local new_line = util.copy(line);
 
-        new_line.text = unrtl(new_line.text);
-        local reverse = Split:reverse(new_line);
+        new_line.text = removeRTLChars(new_line.text);
+        local reverse = reverse(new_line);
 
         line.comment = true
         subtitles[n + lines_added] = line
@@ -1160,874 +2200,6 @@ function ExtendMove(subtitles, selected_lines, active_line)
     end
 
     aegisub.set_undo_point(extend_move_script_name)
-end
-
-function fixinline(sub, sel, act)
-  local meta,styles=karaskel.collect_head(sub,false)
-  for si, li in ipairs(sel) do
-    local line = sub[li]
-    karaskel.preproc_line(sub,meta,styles,line)
-    style1 = line.style
-    text1 = line.text
-    text1 = text1:gsub("{([^\\{}]-)}","《《%1》》")
-    otext = (text1:match("^{") == nil) and "{}" .. text1 or text1
-    otext = otext:gsub("}{","")
-    :gsub(LRM, "")
-    :gsub(RLE , "")
-    :gsub(RLM, "")
-    :gsub(PDF, "")
-    :gsub("\\c&","\\1c&")
-    :gsub("\\fr([^xyz])","\\frz%1")
-    :gsub("\\r([\\}])","\\r"..style1.."%1")
-    :gsub("\\s([01])","\\str%1")
-    :gsub("\\i([01])","\\ita%1")
-    :gsub("\\fs([%d%.])","\\fsize%1")
-    :gsub("\\b(%d)","\\bold%1")
-    :gsub("\\a(%d)","\\alig%1")
-    :gsub("\\p(%d)","\\pic%1")
-    :gsub("\\N","\\N\\N")
-    otext=otext:gsub("(\\t%([^\\%(%)]-)(\\[^%(%)]-)(\\i?clip%([^%)]-%))([^%)]-%))","%1%2%4%1%3%)")
-    :gsub("(\\t%([^\\%(%)]-)(\\i?clip%([^%)]-%))(\\[^%)]-%))","%1%3%1%2%)")
-    :gsub("(\\t%([^%(%)]-)%(([^%)]-)%)([^%)]-%))","%1#%2%$%3")
-    trnsfrm=""
-    for otto in otext:gmatch("\\i?clip%([^%(%)]-%)") do
-      trnsfrm=trnsfrm..otto
-    end
-    for toot in otext:gmatch("\\t%([^%(%)]-#[^%)]-%$[^%)]-%)") do
-      trnsfrm=trnsfrm..toot
-    end
-    otext=otext:gsub("\\i?clip%([^%(%)]-%)","")
-    :gsub("\\t%([^%(%)]-#[^%)]-%$[^%)]-%)","")
-    otext = "\\N"..otext.."\\N"
-    ss_table = {}
-    for tgs, txs in otext:gmatch("({[^}]*})([^{]*)") do
-      table.insert(ss_table, { tag = tgs, text = txs })
-    end
-    local warp = nil
-    for qq = 1,#sub do
-      if sub[qq].class == "info" then
-        local qw = sub[qq]
-        if qw.key == "WrapStyle" then
-          warp = qw.value
-          break
-        end
-      end
-    end
-    if warp ~= nil and ss_table[1].tag:match("\\q") == nil then
-      ss_table[1].tag=ss_table[1].tag:gsub("{","{\\q"..warp)
-    end
-    for wq = 1,#ss_table do
-      if ss_table[wq].text:match("\\n") then
-        for wwq = wq,1,-1 do
-          if ss_table[wwq].tag:match("\\q") then
-            if ss_table[wwq].tag:match("\\q2") then
-              ss_table[wq].text=ss_table[wq].text:gsub("\\n","\\N\\Nth¡s ¡s soft not hard")
-            end
-            break
-          end
-        end
-      end
-    end
-    stext = ""
-    for ss = 1,#ss_table do
-      stext = stext .. ss_table[ss].tag .. ss_table[ss].text
-    end
-    stext = "\\N"..stext
-    ar_table = {}
-    for tg, tx in stext:gmatch("({[^}]*})([^{]*)") do
-      table.insert(ar_table, { tag = tg, text = tx })
-    end
-    repeat
-      local tagt = false
-      for l = 1,#ar_table do
-        if ar_table[l].tag:match("\\t%([^%(%)\\]-\\") then
-          tagt = true
-          ar_table[l].tag=ar_table[l].tag:gsub("(\\t%([^%(%)\\]-)\\","%1¡")
-        end
-      end
-    until not tagt
-    stags = {"\\fsize","\\fscx","\\fscy","\\fsp","\\1c","\\2c","\\3c","\\4c","\\1a","\\2a","\\3a","\\4a","\\bord","\\shad","\\bold","\\ita","\\u","\\str","\\frz","\\fn","\\fe","\\blur","\\be","\\frx","\\fry","\\fax","\\fay","\\xbord","\\xshad","\\ybord","\\yshad","\\pic","\\pbo","\\q"}
-    for ord = 1,#ar_table do
-      for ats = 1,#stags do
-        if ar_table[ord].tag:match(stags[ats]) then
-          local clean = {}
-          for dro in ar_table[ord].tag:gmatch(stags[ats]) do
-            table.insert(clean,  dro)
-          end
-          ar_table[ord].tag=ar_table[ord].tag:gsub(stags[ats].."[^\\}]+","", #clean - 1)
-        end
-      end
-    end
-    for bb = 1,#ar_table do
-      if ar_table[bb].tag:match("\\alpha") then
-        local cleana = {}
-        for droa in ar_table[bb].tag:gmatch("(\\alpha)") do
-          table.insert(cleana,  droa)
-        end
-        ar_table[bb].tag=ar_table[bb].tag:gsub("\\alpha[^\\}]+","", #cleana - 1)
-        local beforea = ar_table[bb].tag:match("(.+)\\alpha")
-        local aftera = ar_table[bb].tag:match("\\alpha[^\\}]+(.+)")
-        local alpha = ar_table[bb].tag:match("\\alpha[^\\}]+")
-        for cc = 1,4 do
-          beforea=beforea:gsub("\\"..cc.."a[^\\}]+","")
-          if aftera:match("\\"..cc.."a") == nil then
-            alpha=alpha:gsub("\\alpha([^\\}]+)","\\alpha%1\\"..cc.."a%1")
-          end
-        end
-        ar_table[bb].tag = beforea..alpha..aftera
-      end
-    end
-    for dd = 1,#ar_table do
-      ar_table[dd].tag=ar_table[dd].tag:gsub("\\alpha([^\\}]+)","")
-    end
-    local ff = nil
-    rtags = {"\\fsize","\\fscx","\\fscy","\\fsp","\\1c","\\2c","\\3c","\\4c","\\1a","\\2a","\\3a","\\4a","\\bord","\\shad","\\bold","\\ita","\\u","\\str","\\frz","\\fn","\\fe"}
-    rsty = {"fontsize","scale_x","scale_y","spacing","color1","color2","color3","color4","color1","color2","color3","color4","outline","shadow","bold","italic","underline","strikeout","angle","fontname","encoding"}
-    for ee = 1,#ar_table do
-      if ar_table[ee].tag:match("\\r") then
-        local cleanr = {}
-        for dror in ar_table[ee].tag:gmatch("(\\r)") do
-          table.insert(cleanr,  dror)
-        end
-        ar_table[ee].tag=ar_table[ee].tag:gsub("\\r[^\\}]+","", #cleanr -1)
-        ff = ar_table[ee].tag:match("\\r([^\\}]+)")
-        rtagsty = {}
-        for ir = 1,#sub do
-          if sub[ir].class == "style" then
-            local rst = sub[ir]
-            if ff == rst.name then
-              rstyref = rst
-              break
-            end
-          end
-        end
-        for hr = 1,#rsty do
-          rtagsty[hr] = rstyref[rsty[hr]]
-        end
-        for hh = 5,8 do
-          rtagsty[hh] = rtagsty[hh]:gsub("H%x%x","H")
-        end
-        for ii = 9,12 do
-          rtagsty[ii] = rtagsty[ii]:match("&H%x%x").."&"
-        end
-        local beforer = ar_table[ee].tag:match("(.+)\\r")
-        local afterr = ar_table[ee].tag:match("\\r[^\\}]+(.+)")
-        local rtag = ar_table[ee].tag:match("\\r[^\\}]+")
-        for jj = 1,#rtags do
-          beforer=beforer:gsub(rtags[jj].."[^\\}]+","")
-          if afterr:match(rtags[jj]) == nil then
-            local tag3 = rtagsty[jj]
-            if type(tag3) == "string" or type(tag3) == "number" then
-              rtag=rtag:gsub("(\\r[^\\}]+)","%1"..rtags[jj]..tag3)
-            else
-              if tag3 then
-                rtag=rtag:gsub("(\\r[^\\}]+)","%1"..rtags[jj].."1")
-              else
-                rtag=rtag:gsub("(\\r[^\\}]+)","%1"..rtags[jj].."0")
-              end
-            end
-          end
-        end
-        ar_table[ee].tag = beforer..rtag..afterr
-      end
-    end
-    for kk = 1,#ar_table do
-      ar_table[kk].tag=ar_table[kk].tag:gsub("\\r[^\\}]+","")
-    end
-    ttags = {"\\fsize","\\fsp","\\1c","\\2c","\\3c","\\4c","\\1a","\\2a","\\3a","\\4a","\\fscx","\\fscy","\\frz","\\bord","\\shad","\\fax","\\fay","\\fry","\\frx","\\blur","\\be","\\xbord","\\xshad","\\ybord","\\yshad"}
-    ttags2 = {"¡fsize","¡fsp","¡1c","¡2c","¡3c","¡4c","¡1a","¡2a","¡3a","¡4a","¡fscx","¡fscy","¡frz","¡bord","¡shad","¡fax","¡fay","¡fry","¡frx","¡blur","¡be","¡xbord","¡xshad","¡ybord","¡yshad"}
-    repeat
-      local cleant = false
-      for tcl = 1,#ar_table do
-        for tcle = 1,#ttags do
-          if ar_table[tcl].tag:match(ttags2[tcle]) then
-            local aftert = ar_table[tcl].tag:match(ttags2[tcle].."[^¡%)]+(.+)")
-            if aftert:match(ttags[tcle]) then
-              cleant = true
-              ar_table[tcl].tag=ar_table[tcl].tag:gsub(ttags2[tcle].."[^¡%)]+","",1)
-              ar_table[tcl].tag=ar_table[tcl].tag:gsub("\\t%([^¡%)]-%)","")
-            end
-          end
-        end
-      end
-    until not cleant
-    repeat
-      local tagt2 = false
-      for l = 1,#ar_table do
-        if ar_table[l].tag:match("\\t%([^%(%)¡]-¡") then
-          tagt2 = true
-          ar_table[l].tag=ar_table[l].tag:gsub("(\\t%([^%(%)¡]-)¡","%1\\")
-        end
-      end
-    until not tagt2
-    artext = ""
-    for ar = 1,#ar_table do
-      artext = artext .. ar_table[ar].tag .. ar_table[ar].text
-    end
-    artext = "\\N"..artext
-    t_table = {}
-    for t in artext:gmatch("(\\N.-)\\N") do
-      table.insert(t_table, t)
-    end
-    for aaat = 1,#t_table do
-      t_table[aaat]=t_table[aaat]:gsub("\\N","")
-    end
-    for bbbt = 1,#t_table do
-      t_table[bbbt] = (t_table[bbbt]:match("^{") == nil) and "{}" .. t_table[bbbt] or t_table[bbbt]
-    end
-    ttag = {}
-    tt_table = {}
-    for xt = 1,#t_table do
-      ttt_table = {}
-      for tgt, txt in t_table[xt]:gmatch("({[^}]*})([^{]*)") do
-        table.insert(ttt_table, { tag = tgt, text = txt })
-      end
-      tt_table[xt] = ttt_table
-      tag = {}
-      for tnt = 1,#tt_table[xt] do
-        ag = {}
-        if tt_table[xt][tnt].tag:match("\\t") then
-          for tt in tt_table[xt][tnt].tag:gmatch("(\\t%([^%(%)]-%))") do
-            table.insert(ag, tt)
-          end
-        else
-          ag[1] = ""
-        end
-        for ddt = 1,#ag do
-          ag[ddt]=ag[ddt]:gsub("\\alpha([^\\%)]+)","\\1a%1\\2%1\\3a%1\\4a%1")
-        end
-        for ttt = 1,#ag do
-          if tag[tnt] == nil then
-            tag[tnt] = ag[ttt]
-          else
-            tag[tnt] = tag[tnt]..ag[ttt]
-          end
-        end
-      end
-      ttag[xt] = tag
-    end
-    local tft = nil
-    repeat
-      local found = false
-      for yt = 1,#ttag do
-        for it = 1,#ttag[yt] do
-          if ttag[yt][it]:match("\\t%([^\\%(%)]-\\[^\\%(%)]+\\") then
-            found = true
-            ttag[yt][it]=ttag[yt][it]:gsub("\\t%(([^\\%(%)]-)\\([^\\%)]+)","\\t%(%1\\%2%)\\t%(%1")
-            ttag[yt][it]=ttag[yt][it]:gsub("\\t%([^\\%)]-%)","")
-          end
-        end
-      end
-    until not found
-    for tov = 1,#tt_table do
-      for lt = 1,#tt_table[tov] do
-        tt_table[tov][lt].tag=tt_table[tov][lt].tag:gsub("(\\t%([^%(%)]+%))","")
-      end
-    end
-    for mot = 1,#ttags do
-      poitt = {}
-      for got = 1,#ttag do
-        poit = {}
-        for tog = 1,#ttag[got] do
-          xot = 1
-          yot = 1
-          local found_ttag = false
-          for sot = tog,1,-1 do
-            if tt_table[got][sot].tag:match(ttags[mot]) then
-              yot = got
-              xot = sot
-              found_ttag = true
-              break
-            end
-          end
-          if not found_ttag then
-            for tos = got-1,1,-1 do
-              for fot = #tt_table[tos],1,-1 do
-                if tt_table[tos][fot].tag:match(ttags[mot]) then
-                  yot = tos
-                  xot = fot
-                  break
-                  break
-                end
-              end
-            end
-          end
-          poi = {}
-          if yot < got then
-            for aot = xot,#ttag[yot] do
-              for tesu in ttag[yot][aot]:gmatch("\\t%([^\\%(%)]-"..ttags[mot].."[^\\%(%)]+%)") do
-                table.insert(poi, tesu)
-              end
-            end
-            for sgot = yot+1,got-1 do
-              for stog = 1,#ttag[sgot] do
-                for tou in ttag[sgot][stog]:gmatch("\\t%([^\\%(%)]-"..ttags[mot].."[^\\%(%)]+%)") do
-                  table.insert(poi, tou)
-                end
-              end
-            end
-            for kot = 1,tog do
-              for stou in ttag[got][kot]:gmatch("\\t%([^\\%(%)]-"..ttags[mot].."[^\\%(%)]+%)") do
-                table.insert(poi, stou)
-              end
-            end
-          else
-            for toa = xot,tog do
-              for tous in ttag[got][toa]:gmatch("\\t%([^\\%(%)]-"..ttags[mot].."[^\\%(%)]+%)") do
-                table.insert(poi, tous)
-              end
-            end
-          end
-          poit[tog] = poi
-        end
-        poitt[got] = poit
-      end
-      for wot = 1,#poitt do
-        for tow = 1,#poitt[wot] do
-          ttag[wot][tow]=ttag[wot][tow]:gsub("\\t%([^\\%(%)]-"..ttags[mot].."[^\\%(%)]+%)","")
-          for owt = #poitt[wot][tow],1,-1 do
-            ttag[wot][tow] = poitt[wot][tow][owt]..ttag[wot][tow]
-          end
-        end
-      end
-    end
-    n_table = {}
-    for n in artext:gmatch("(\\N.-)\\N") do
-      table.insert(n_table, n)
-    end
-    for aaa = 1,#n_table do
-      n_table[aaa]=n_table[aaa]:gsub("\\N","")
-    end
-    for bbb = 1,#n_table do
-      n_table[bbb] = (n_table[bbb]:match("^{") == nil) and "{}" .. n_table[bbb] or n_table[bbb]
-    end
-    yy_table = {}
-    for y = 1,#n_table do
-      yyy_table = {}
-      for tg, tx in n_table[y]:gmatch("({[^}]*})([^{]*)") do
-        table.insert(yyy_table, { tag = tg, text = tx })
-      end
-      yy_table[y] = yyy_table
-    end
-    for ll = 1,#yy_table do
-      for lll = 1,#yy_table[ll] do
-        yy_table[ll][lll].tag=yy_table[ll][lll].tag:gsub("(\\t%([^%(%)]+%))","")
-      end
-    end
-    for vn = 1,#stags do
-      local cn = nil
-      for z = 1,#n_table do
-        for iin = z-1,1,-1 do
-          if yy_table[z][1].tag ~= nil and yy_table[z][1].tag:match(stags[vn]) then
-            break
-          else
-            for jn = #yy_table[iin],1,-1 do
-              if yy_table[iin][jn].tag ~= nil and yy_table[iin][jn].tag:match(stags[vn].."[^\\}]+") then
-                cn = yy_table[iin][jn].tag:match(stags[vn].."[^\\}]+")
-                yy_table[z][1].tag=yy_table[z][1].tag:gsub("{","{"..cn)
-                goto donec
-              end
-            end
-          end
-        end
-        ::donec::
-      end
-    end
-    for nnn = 1,#n_table do
-      n_table[nnn] = ""
-      for mm = 1,#yy_table[nnn] do
-        n_table[nnn] = n_table[nnn] .. yy_table[nnn][mm].tag .. yy_table[nnn][mm].text
-      end
-    end
-    alt = {}
-    tagii = {}
-    jj_table = {}
-    for x = 1,#n_table do
-      jjj_table = {}
-      for tg, tx in n_table[x]:gmatch("({[^}]*})([^{]*)") do
-        table.insert(jjj_table, { tag = tg, text = tx })
-      end
-      jj_table[x] = jjj_table
-      btags = {"\\an","\\alig","\\pos","\\move","\\org","\\fad(","\\fade"}
-      for ba = 1,#btags do
-        b_table = {}
-        for bp = 1,#jj_table[x] do
-          if jj_table[x][bp].tag:match(btags[ba]) then
-            b_table[bp] = jj_table[x][bp].tag:match(btags[ba].."[^\\}]+")
-            jj_table[x][bp].tag=jj_table[x][bp].tag:gsub(btags[ba].."[^\\}]+","")
-          else
-            b_table[bp] = ""
-          end
-        end
-        for pb = 1,#jj_table[x] do
-          jj_table[x][pb].tag=jj_table[x][pb].tag:gsub("{","{"..b_table[#jj_table[x]-pb+1])
-        end
-      end
-      sty = {"fontsize","scale_x","scale_y","spacing","color1","color2","color3","color4","color1","color2","color3","color4","outline","shadow","bold","italic","underline","strikeout","angle","fontname","encoding"}
-      tagsty = {}
-      for h = 1,#sty do
-        tagsty[h] = line.styleref[sty[h]]
-      end
-      for n = 5,8 do
-        tagsty[n]=tagsty[n]:gsub("H%x%x","H")
-      end
-      for m = 9,12 do
-        tagsty[m]=tagsty[m]:match("&H%x%x").."&"
-      end
-      for a = 22,27 do
-        tagsty[a] = 0
-      end
-      tagsty[28] = tagsty[13]
-      tagsty[29] = tagsty[14]
-      tagsty[30] = tagsty[13]
-      tagsty[31] = tagsty[14]
-      tagsty[32] = 0
-      tagsty[33] = 0
-      tagsty[34] = warp
-      for qo = x-1,1,-1 do
-        if jj_table[qo][1].text:match("th¡s ¡s soft not hard") then
-          alt[qo][#alt[qo]+1] = "{\\q2}"
-        end
-      end
-      for om = 1,#stags do
-        for op = x-1,1,-1 do
-          for po = 1,#alt[op] do
-            if alt[op][po]:match(stags[om]) then
-              tagsty[om] = alt[op][po]:match(stags[om].."([^\\}]+)")
-              goto dones
-            end
-          end
-        end
-        ::dones::
-      end
-      for oqo = x-1,1,-1 do
-        if jj_table[oqo][1].text:match("th¡s ¡s soft not hard") then
-          alt[oqo][#alt[oqo]] = nil
-        end
-      end
-      if jj_table[x][1].text:match("th¡s ¡s soft not hard") then
-        tagsty[34] = 2
-      end
-      local c = nil
-      for v = 1,#stags do
-        for i = #jj_table[x],1,-1 do
-          for j = i-1,1,-1 do
-            if jj_table[x][i].tag ~= nil and jj_table[x][i].tag:match(stags[v]) then
-              break
-            else
-              if jj_table[x][j].tag ~= nil and jj_table[x][j].tag:match(stags[v].."[^\\}]+") then
-                c = jj_table[x][j].tag:match(stags[v].."[^\\}]+")
-                jj_table[x][i].tag=jj_table[x][i].tag:gsub("{","{"..c)
-                break
-              end
-            end
-          end
-        end
-      end
-      for o = 1,#stags do
-        for u = 1,#jj_table[x] do
-          if jj_table[x][u].tag:match(stags[o]) == nil then
-            local tag = tagsty[o]
-            if type(tag) == "string" or type(tag) == "number" then
-              jj_table[x][u].tag=jj_table[x][u].tag:gsub("{","{"..stags[o]..tag)
-            else
-              if tag then
-                jj_table[x][u].tag=jj_table[x][u].tag:gsub("{","{"..stags[o].."1")
-              else
-                jj_table[x][u].tag=jj_table[x][u].tag:gsub("{","{"..stags[o].."0")
-              end
-            end
-          end
-        end
-      end
-      for oo = 1,#stags do
-        for uu = #jj_table[x],1,-1 do
-          if jj_table[x][uu].tag:match(stags[oo]) then
-            for ww = uu+1,#jj_table[x] do
-              if jj_table[x][ww].tag:match(stags[oo]) then
-                if jj_table[x][ww].tag:match(stags[oo].."[^\\}]+") == jj_table[x][uu].tag:match(stags[oo].."[^\\}]+") then
-                  jj_table[x][uu].tag=jj_table[x][uu].tag:gsub(stags[oo].."[^\\}]+","")
-                end
-                break
-              end
-            end
-          end
-        end
-      end
-      tsty = {"fontsize","spacing","color1","color2","color3","color4","color1","color2","color3","color4","scale_x","scale_y","angle","outline","shadow"}
-      tagtsty = {}
-      for ht = 1,#tsty do
-        tagtsty[ht] = line.styleref[tsty[ht]]
-      end
-      for nt = 3,6 do
-        tagtsty[nt]=tagtsty[nt]:gsub("H%x%x","H")
-      end
-      for mt = 7,10 do
-        tagtsty[mt]=tagtsty[mt]:match("&H%x%x").."&"
-      end
-      for tat = 16,21 do
-        tagtsty[tat] = 0
-      end
-      tagtsty[22] = tagtsty[14]
-      tagtsty[23] = tagtsty[15]
-      tagtsty[24] = tagtsty[14]
-      tagtsty[25] = tagtsty[15]
-      for omt = 1,#ttags do
-        for opt = x-1,1,-1 do
-          for pot = 1,#alt[opt] do
-            if alt[opt][pot]:match(ttags[omt]) then
-              tagtsty[omt] = alt[opt][pot]:match(ttags[omt].."([^\\}]+)")
-              goto donet
-            end
-          end
-        end
-        ::donet::
-      end
-      for at = 1,#ttags do
-        for ta = 1,#jj_table[x] do
-          if ttag[x][ta]:match(ttags[at]) then
-            jjj = ta-1
-            if jjj > 0 then
-              for jjjj = jjj+1,#jj_table[x] do
-                if jj_table[x][jjj].tag:match(ttags[at]) then
-                  break
-                else
-                  if jj_table[x][jjjj].tag:match(ttags[at]) then
-                    tar = jj_table[x][jjjj].tag:match(ttags[at].."[^\\}]+")
-                    jj_table[x][jjj].tag=jj_table[x][jjj].tag:gsub("{","{"..tar)
-                  end
-                end
-              end
-              if jj_table[x][jjj].tag:match(ttags[at]) == nil then
-                jj_table[x][jjj].tag=jj_table[x][jjj].tag:gsub("{","{"..ttags[at]..tagtsty[at])
-              end
-            end
-          end
-        end
-      end
-      for tot = 1,#jj_table[x] do
-        jj_table[x][tot].tag=jj_table[x][tot].tag:gsub("{","{"..ttag[x][tot])
-      end
-      local ct = 0
-      local ctt = -1
-      local rar = nil
-      for vt = 1,#ttags do
-        for it = #jj_table[x],1,-1 do
-          if jj_table[x][it].tag:match(ttags[vt]) == nil then
-            for jt = it-1,1,-1 do
-              if jj_table[x][jt].tag ~= nil and jj_table[x][jt].tag:match(ttags[vt]) then
-                ct = jt
-                break
-              end
-            end
-            for jtt = it-1,1,-1 do
-              if jj_table[x][jtt].tag ~= nil and jj_table[x][jtt].tag:match("\\t%([^\\%(%)]-"..ttags[vt]) then
-                ctt = jtt
-                break
-              end
-            end
-            if ct <= ctt then
-              if jj_table[x][ctt].tag:match("\\t%([^\\%(%)]-"..ttags[vt]) ~= nil then
-                for uou = 1,#jj_table[x][ctt].tag:match("\\t%([^\\%(%)]-"..ttags[vt]) do
-                  rar = jj_table[x][ctt].tag:match("\\t%([^\\%(%)]-"..ttags[vt].."[^\\%(%)]+%)")
-                  if rar ~= nil then
-                    jj_table[x][it].tag=jj_table[x][it].tag:gsub("{","{"..rar)
-                    jj_table[x][ctt].tag=jj_table[x][ctt].tag:gsub(rar,"")
-                  end
-                end
-              end
-            end
-          end
-        end
-      end
-      tag2 = {}
-      for tnts = 1,#jj_table[x] do
-        ag2 = {}
-        if jj_table[x][tnts].tag:match("\\t") then
-          for tts in jj_table[x][tnts].tag:gmatch("(\\t%([^%(%)]-%))") do
-            table.insert(ag2, tts)
-          end
-        else
-          ag2[1] = ""
-        end
-        local lo = nil
-        for lol = 1,#ag2 do
-          if ag2[lol] ~= "" then
-            for lool = lol+1,#ag2 do
-              if ag2[lool] ~= "" and ag2[lol]:match("\\t%(([^\\%(%)]*)") == ag2[lool]:match("\\t%(([^\\%(%)]*)") then
-                lo = ag2[lool]:match("\\t%([^\\%(%)]-(\\[^%(%)]+)%)")
-                ag2[lol]=ag2[lol]:gsub("%)",lo.."%)")
-                ag2[lool] = ""
-              end
-            end
-          end
-        end
-        repeat
-          local foundalp = false
-          for aat = 1,#ag2 do
-            if ag2[aat]:match("\\1a") then
-              if ag2[aat]:match("\\2a") then
-                if ag2[aat]:match("\\3a") then
-                  if ag2[aat]:match("\\4a") then
-                    if ag2[aat]:match("\\1a([^\\%)]+)") == ag2[aat]:match("\\2a([^\\%)]+)") then
-                      if ag2[aat]:match("\\2a([^\\%)]+)") == ag2[aat]:match("\\3a([^\\%)]+)") then
-                        if ag2[aat]:match("\\3a([^\\%)]+)") == ag2[aat]:match("\\4a([^\\%)]+)") then
-                          foundalp = true
-                          ag2[aat]=ag2[aat]:gsub("\\2a[^\\%)]+","",1)
-                          ag2[aat]=ag2[aat]:gsub("\\3a[^\\%)]+","",1)
-                          ag2[aat]=ag2[aat]:gsub("\\4a[^\\%)]+","",1)
-                          ag2[aat]=ag2[aat]:gsub("\\1a([^\\%)]+)","\\alpha%1",1)
-                        end
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
-        until not foundalp
-        for ttts = 1,#ag2 do
-          if tag2[tnts] == nil then
-            tag2[tnts] = ag2[ttts]
-          else
-            tag2[tnts] = tag2[tnts]..ag2[ttts]
-          end
-        end
-      end
-      for ollo = 1,#jj_table[x] do
-        jj_table[x][ollo].tag=jj_table[x][ollo].tag:gsub("(\\t%([^%(%)]+%))","")
-      end
-      for b = 1,#stags do
-        for q = #jj_table[x],1,-1 do
-          if jj_table[x][q].tag:match(stags[b]) then
-            local found_next_tag = false
-            for w = q+1,#jj_table[x] do
-              if jj_table[x][w].tag ~= nil and jj_table[x][w].tag:match(stags[b]) or tag2[w]:match(stags[b]) then
-                found_next_tag = true
-                break
-              end
-            end
-            if not found_next_tag then
-              local tag2 = tagsty[b]
-              if type(tag2) == "string" or type(tag2) == "number" then
-                tag2 = tostring(tag2)
-                if jj_table[x][q].tag:match(stags[b].."[^\\}]+") ~= stags[b]..tag2 then
-                  break
-                else
-                  jj_table[x][q].tag=jj_table[x][q].tag:gsub(stags[b].."[^\\}]+","")
-                end
-              else
-                if tag2 then
-                  if jj_table[x][q].tag:match(stags[b].."[^\\}]+") ~= stags[b].."1" then
-                    break
-                  else
-                    jj_table[x][q].tag=jj_table[x][q].tag:gsub(stags[b].."[^\\}]+","")
-                  end
-                else
-                  if jj_table[x][q].tag:match(stags[b].."[^\\}]+") ~= stags[b].."0" then
-                    break
-                  else
-                    jj_table[x][q].tag=jj_table[x][q].tag:gsub(stags[b].."[^\\}]+","")
-                  end
-                end
-              end
-            end
-          end
-        end
-      end
-      for tr = 1,#ttags do
-        if jj_table[x][#jj_table[x]].tag:match(ttags[tr]) == nil then
-          tba = 0
-          abt = 0
-          for rt = x-1,1,-1 do
-            for tup = 1,#tagii[rt] do
-              if tagii[rt][tup]:match(ttags[tr]) then
-                tba = rt
-                abt = tup
-                goto donet2
-              end
-            end
-          end
-          ::donet2::
-          uop = 0
-          pou = -1
-          for rtp = x-1,1,-1 do
-            for tupp = 1,#tagii[rtp] do
-              if alt[rtp][tupp]:match(ttags[tr]) then
-                uop = rtp
-                pou = tupp
-                goto donet3
-              end
-            end
-          end
-          ::donet3::
-          if uop <= tba then
-            if abt <= pou then
-              jj_table[x][#jj_table[x]].tag=jj_table[x][#jj_table[x]].tag:gsub("{","{"..ttags[tr]..tagtsty[tr])
-            end
-          end
-        end
-      end
-      alt2 = {}
-      for vgd = 1,#jj_table[x] do
-       alt2[vgd] = jj_table[x][vgd].tag
-      end
-      alt[x] = alt2
-      for ry = 1,#jj_table[x] do
-        local jtagr = {}
-        local foundr3 = false
-        for ryo = 1,#rtags do
-          local foundr1 = false
-          for yr = ry,#jj_table[x] do
-            if jj_table[x][yr].tag:match(rtags[ryo]) then
-              foundr1 = true
-              jtagr[ryo] = jj_table[x][yr].tag:match(rtags[ryo].."([^\\}]+)")
-              break
-            end
-          end
-          if foundr1 then
-            foundr3 = true
-          else
-            jtagr[ryo] = tagsty[ryo]
-          end
-        end
-        if foundr3 then
-          for touy = 1,#jtagr do
-            if type(jtagr[touy]) == "string" or type(jtagr[touy]) == "number" then
-              jtagr[touy] = tostring(jtagr[touy])
-            else
-              if jtagr[touy] then
-                jtagr[touy] = "1"
-              else
-                jtagr[touy] = "0"
-              end
-            end
-          end
-          local rtagr = nil
-          for ryu = 1,#sub do
-            local jtagr2 = {}
-            if sub[ryu].class == "style" then
-              ror = sub[ryu]
-              for oro = 1,#rsty do
-                jtagr2[oro] = ror[rsty[oro]]
-              end
-              for hhr = 5,8 do
-                jtagr2[hhr] = jtagr2[hhr]:gsub("H%x%x","H")
-              end
-              for iir = 9,12 do
-                jtagr2[iir] = jtagr2[iir]:match("&H%x%x").."&"
-              end
-              for touyy = 1,#jtagr2 do
-                if type(jtagr2[touyy]) == "string" or type(jtagr2[touyy]) == "number" then
-                  jtagr2[touyy] = tostring(jtagr2[touyy])
-                else
-                  if jtagr2[touyy] then
-                    jtagr2[touyy] = "1"
-                  else
-                    jtagr2[touyy] = "0"
-                  end
-                end
-              end
-              local foundr2 = false
-              for iri = 1,#rsty do
-                if jtagr[iri] ~= jtagr2[iri] then
-                  foundr2 = true
-                end
-              end
-              if not foundr2 then
-                rtagr = ror.name
-                break
-              end
-            end
-          end
-          if rtagr ~= nil then
-            for oyr = 1,#rtags do
-              jj_table[x][ry].tag=jj_table[x][ry].tag:gsub(rtags[oyr].."[^\\}]+","")
-            end
-            jj_table[x][ry].tag=jj_table[x][ry].tag:gsub("{","{\\r"..rtagr)
-          end
-        end
-      end
-      for aa = 1,#jj_table[x] do
-        if jj_table[x][aa].tag:match("\\1a") then
-          if jj_table[x][aa].tag:match("\\2a") then
-            if jj_table[x][aa].tag:match("\\3a") then
-              if jj_table[x][aa].tag:match("\\4a") then
-                if jj_table[x][aa].tag:match("\\1a([^\\}]+)") == jj_table[x][aa].tag:match("\\2a([^\\}]+)") then
-                  if jj_table[x][aa].tag:match("\\2a([^\\}]+)") == jj_table[x][aa].tag:match("\\3a([^\\}]+)") then
-                    if jj_table[x][aa].tag:match("\\3a([^\\}]+)") == jj_table[x][aa].tag:match("\\4a([^\\}]+)") then
-                      jj_table[x][aa].tag=jj_table[x][aa].tag:gsub("\\2a[^\\}]+","")
-                      jj_table[x][aa].tag=jj_table[x][aa].tag:gsub("\\3a[^\\}]+","")
-                      jj_table[x][aa].tag=jj_table[x][aa].tag:gsub("\\4a[^\\}]+","")
-                      jj_table[x][aa].tag=jj_table[x][aa].tag:gsub("\\1a([^\\}]+)","\\alpha%1")
-                    end
-                  end
-                end
-              end
-            end
-          end
-        end
-      end
-      for oto = 1,#jj_table[x] do
-        jj_table[x][oto].tag=jj_table[x][oto].tag:gsub("}",tag2[oto].."}")
-      end
-      tagii[x] = tag2
-      if x == 1 then
-        jj_table[x][#jj_table[x]].tag=jj_table[x][#jj_table[x]].tag:gsub("{","{"..trnsfrm)
-      end
-      n_table[x] = ""
-      for tn = #jj_table[x],1,-1 do
-        n_table[x] = n_table[x] .. jj_table[x][tn].tag .. jj_table[x][tn].text
-      end
-      n_table[x]=n_table[x]:gsub("}([^{]+)","}££££££££££₩₩₩₩₩₩₩₩₩₩%1€€€€€€€€€€¥¥¥¥¥¥¥¥¥¥")
-      :gsub("([^{}]+)€€€€€€€€€€¥¥¥¥¥¥¥¥¥¥{}££££££££££₩₩₩₩₩₩₩₩₩₩([^{}]+)","%1%2")
-    end
-    for nn = 2,#n_table do
-      if n_table[nn]:match("th¡s ¡s soft not hard") then
-        n_table[nn]=n_table[nn]:gsub("th¡s ¡s soft not hard","")
-        n_table[nn] = "\\n"..n_table[nn]
-        local found_q = false
-        for nnq = nn-1,1,-1 do
-          for qnn = 1,#jj_table[nnq] do
-            if jj_table[nnq][qnn].tag:match("\\q") then
-              found_q = true
-              if jj_table[nnq][qnn].tag:match("\\q(%d)") ~= "2" then
-                n_table[nn] = "{\\q2}"..n_table[nn]
-              end
-              goto doneq
-            end
-          end
-        end
-        ::doneq::
-        if not found_q then
-          if warp ~= "2" then
-            n_table[nn] = "{\\q2}"..n_table[nn]
-          end
-        end
-      else
-        n_table[nn] = "\\N"..n_table[nn]
-      end
-    end
-    pt = ""
-    for tt = 1,#n_table do
-      pt = pt .. n_table[tt]
-    end
-    pt=pt:gsub("\\1c&","\\c&")
-    :gsub("\\frz","\\fr")
-    :gsub("\\str","\\s")
-    :gsub("\\ita","\\i")
-    :gsub("\\fsize","\\fs")
-    :gsub("\\bold","\\b")
-    :gsub("\\alig","\\a")
-    :gsub("\\pic","\\p")
-    :gsub("\\r"..style1.."([\\}])","\\r%1")
-    :gsub("(\\t%([^%(%)]-)#([^%)]-)%$([^%)]-%))","%1%(%2%)%3")
-    :gsub("{}","")
-    :gsub("《《([^\\{}]-)》》","{%1}")
-    line.text=pt
-    sub[li]=line
-  end
-  return sel
 end
 
 ----- Register Scripts -----
